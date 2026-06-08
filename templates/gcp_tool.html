@@ -87,7 +87,7 @@ function loadImage(){
   document.getElementById("imgname").textContent = fn;
   img = new Image();
   img.onload = () => { fit(); draw(); refreshPanel(); };
-  img.src = `/uploads/${JOB}/${fn}`;
+  img.src = "{{ url_for('serve_upload', job_id=job_id, filename='__FN__') }}".replace('__FN__', fn);
 }
 
 function refreshPanel(){
@@ -148,14 +148,14 @@ document.getElementById("save").onclick=async()=>{
     Object.entries(manual[fn]||{}).forEach(([id,xy])=>o[id]=xy);
     if(Object.keys(o).length) obs[fn]=o;
   });
-  const r=await fetch(`{{ url_for('api_save_observations', job_id='__JOB__') }}`.replace('__JOB__',JOB),{method:"POST",headers:{"Content-Type":"application/json"},
+  const r=await fetch("{{ url_for('api_save_observations', job_id=job_id) }}",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({observations:obs})});
   st.textContent = r.ok ? `saved ✓ (${Object.keys(obs).length} images)` : "save failed";
 };
 
 // boot
 (async()=>{
-  const r=await fetch(`{{ url_for('api_markers', job_id='__JOB__') }}`.replace('__JOB__',JOB)); const data=await r.json();
+  const r=await fetch("{{ url_for('api_markers', job_id=job_id) }}"); const data=await r.json();
   images=data.images; det=data.detected||{};
   const ids=[...new Set(Object.values(det).flat().map(m=>m.id))].sort((a,b)=>a-b);
   document.getElementById("activeId").innerHTML =

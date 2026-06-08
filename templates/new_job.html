@@ -149,7 +149,7 @@
         const fd = new FormData();
         for (const f of fileInput.files) fd.append("photos", f);
         try {
-            const r = await fetch("/api/upload", {method: "POST", body: fd});
+            const r = await fetch("{{ url_for('api_upload') }}", {method: "POST", body: fd});
             const d = await r.json();
             if (!r.ok) throw new Error(d.error || "upload failed");
             jobId.value = d.job_id;
@@ -192,7 +192,7 @@
               y = document.getElementById("off-y").value,
               z = document.getElementById("off-z").value;
         if (!name || x === "" || y === "" || z === "") return;
-        const r = await fetch("/api/offset-presets", {
+        const r = await fetch("{{ url_for('api_add_offset_preset') }}", {
             method: "POST", headers: {"Content-Type": "application/json"},
             body: JSON.stringify({name, offset: [+x, +y, +z]})});
         if (r.ok) {

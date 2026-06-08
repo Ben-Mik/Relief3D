@@ -1,0 +1,8 @@
+.env
+jobs/
+uploads/
+outputs/
+offset_presets.json
+__pycache__/
+*.pyc
+static/tailwind.css

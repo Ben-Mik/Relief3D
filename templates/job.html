@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mb-6">
+    <h2 class="text-2xl font-bold mt-2">Job {{ job_id }}</h2>
+    <p class="opacity-70 text-sm">Project #{{ job.project_id }} → {{ job.model_name }}</p>
+</div>
+<div class="rounded-3xl border border-secondary p-6 space-y-4 overflow-hidden">
+    <div>
+        <span id="badge" class="text-sm opacity-70">{{ job.step }}</span>
+    </div>
+    {# No numeric progress tracking — animate while running, solid when done. #}
+    <progress id="progress" class="progress progress-primary w-full"
+              {% if job.status == 'done' %}value="100"{% endif %} max="100"></progress>
+    {% if job.status == 'failed' %}
+    <div class="alert alert-error">{{ job.error }}</div>
+    {% endif %}
+    {% if job.gcp_count and job.georef %}
+    <div class="flex items-center gap-2 text-sm">
+        {% if job.georeferenced %}
+        <span class="badge badge-success">Geo</span>
+        <span class="opacity-70">{{ job.crs }} · {{ job.georef.rms_mm|round(1) }} mm RMS ·
+            {{ job.georef.inliers|length }} markers{% if job.georef.outliers %}, {{ job.georef.outliers|length }} dropped{% endif %}</span>
+        {% else %}
+        <span class="badge badge-error">Geo</span>
+        <span class="opacity-70">{{ job.georef.reason }}</span>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% if job.can_reupload or job.can_retry %}
+    <div class="flex items-center gap-2 text-sm">
+        {% if job.can_reupload %}
+        <span class="badge badge-warning cursor-pointer reupload"
+              data-url="{{ url_for('reupload', job_id=job_id) }}">↻ Reupload</span>
+        {% endif %}
+        {% if job.can_retry %}
+        <span class="badge badge-info cursor-pointer retry"
+              data-url="{{ url_for('new_job', project_id=job.project_id, retry=job_id) }}">↻ Retry</span>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+<div class="mt-4">
+    <a href="{{ url_for('history') }}" class="btn btn-primary">View all jobs</a>
+</div>
+<script>
+    const done = ["done", "failed"];
+    let status = "{{ job.status }}";
+    async function poll() {
+        if (done.includes(status)) return;
+        const res = await fetch("{{ url_for('api_job', job_id=job_id) }}");
+        const job = await res.json();
+        document.getElementById("badge").textContent = job.step || "";
+        status = job.status;
+        if (done.includes(status)) window.location.reload();
+    }
+    setInterval(poll, 3000);
+</script>
+{% endblock %}

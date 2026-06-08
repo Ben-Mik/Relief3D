@@ -1,0 +1,9 @@
+outputs/
+uploads/
+jobs/
+admin_settings.json
+.env
+*.log
+*.pid
+__pycache__/
+.git/

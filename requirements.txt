@@ -1,0 +1,8 @@
+Flask==3.0.0
+Flask-CORS==4.0.0
+requests==2.31.0
+python-dotenv==1.0.1
+# AprilTag/ArUco GCP detection. Headless wheel avoids GUI system libs.
+# Pinned: the aruco API was restructured at 4.7 (ArucoDetector class), so
+# don't float the version. (Pulls numpy, used by georef.py.)
+opencv-contrib-python-headless==4.10.0.84

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex items-center justify-between mb-6">
+    <h2 class="text-2xl font-bold">Job history</h2>
+</div>
+{% if jobs %}
+<div class="space-y-4">
+    {% for job_id, job in jobs %}
+    <a href="{{ url_for('job_status', job_id=job_id) }}" class="block rounded-3xl border border-secondary p-6 overflow-hidden">
+        <div class="flex justify-between items-start">
+            <div>
+                <h3 class="text-xl">{{ job.model_name }}</h3>
+                <p class="text-sm opacity-70 mt-1">
+                    Project #{{ job.project_id }} · {{ job.photo_count }} photos ·
+                    {{ job.created_at[:16].replace('T', ' ') if job.created_at else '' }}
+                </p>
+            </div>
+            <span class="flex items-center gap-2 text-sm opacity-70">
+                {% if job.gcp_count and job.georef %}
+                <span class="badge badge-sm {{ 'badge-success' if job.georeferenced else 'badge-error' }}">Geo</span>
+                {% endif %}
+                {% if job.can_reupload %}
+                <span class="badge badge-sm badge-warning cursor-pointer reupload"
+                      data-url="{{ url_for('reupload', job_id=job_id) }}">↻ Reupload</span>
+                {% endif %}
+                {% if job.can_retry %}
+                <span class="badge badge-sm badge-info cursor-pointer retry"
+                      data-url="{{ url_for('new_job', project_id=job.project_id, retry=job_id) }}">↻ Retry</span>
+                {% endif %}{{ job.status }}
+            </span>
+        </div>
+        <progress class="progress progress-primary w-full mt-4"
+                  {% if job.status == 'done' %}value="100"{% endif %} max="100"></progress>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<p class="opacity-70">No jobs yet.</p>
+{% endif %}
+{% endblock %}

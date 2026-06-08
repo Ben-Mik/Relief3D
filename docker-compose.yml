@@ -1,0 +1,49 @@
+# Relief3D — single self-contained service, wired into the 3D-Annotator stack.
+# Relief3D exists to feed the annotator, so it always runs alongside it: it joins
+# the annotator's shared `traefik` network and is served behind traefik.
+#
+#   ① browser → traefik PathPrefix(/relief3d) → relief3d:5002
+#   ② relief3d → http://api:8000  (same network, resolved by container name)
+#
+# Run order: bring the annotator stack up first (it creates the `traefik` network
+# and the `api` container), then:  docker compose up -d --build
+#
+# Annotator side, one-time: the outbound "New job" link in
+#   3D-Annotator/frontend/src/ui/pages/project/ProjectPage.tsx
+# must point at  /relief3d/  (not /odm-link/), then rebuild the annotator frontend.
+#
+# x86 + AVX only (OpenMVS TextureMesh) — won't run on Apple Silicon.
+services:
+  relief3d:
+    build: .
+    image: relief3d:latest
+    pull_policy: never
+    container_name: relief3d
+    restart: unless-stopped
+    environment:
+      - ANNOTATOR_BASE_URL=http://api:8000
+      - RELIEF3D_DATA=/data
+      # Auto-sweep retention (hours) for abandoned uploads + leftover meshes.
+      - RELIEF3D_SWEEP_HOURS=${RELIEF3D_SWEEP_HOURS:-8}
+    volumes:
+      # All mutable state lands here: uploads (transient), per-job report.txt
+      # logs, jobs.json, offset presets. Heavy meshes are deleted after upload.
+      # Point RELIEF3D_DATA_HOST at a USB/network mount to write there instead.
+      - ${RELIEF3D_DATA_HOST:-./data}:/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.relief3d.rule=Host(`${DEPLOYMENT_DOMAIN}`) && PathPrefix(`/relief3d`)"
+      - "traefik.http.routers.relief3d.entrypoints=websecure"
+      - "traefik.http.routers.relief3d.tls=true"
+      - "traefik.http.routers.relief3d.priority=10050"
+      - "traefik.http.routers.relief3d.middlewares=relief3d-stripprefix"
+      - "traefik.http.middlewares.relief3d-stripprefix.stripprefix.prefixes=/relief3d"
+      - "traefik.http.services.relief3d.loadbalancer.server.port=5002"
+    networks:
+      - traefik
+
+networks:
+  # Created by the 3D-Annotator stack — bring that up first (or at least once).
+  traefik:
+    name: traefik
+    external: true

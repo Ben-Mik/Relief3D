@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mb-6">
+    <h2 class="text-2xl font-bold mt-2">New job</h2>
+    <p class="text-sm opacity-70 mt-1">3D-Annotator project #{{ project_id }}</p>
+</div>
+
+{% if error %}
+<div class="alert alert-error mb-4">{{ error }}</div>
+{% endif %}
+
+{% if not has_token %}
+<div class="alert alert-warning mb-4 text-sm">
+    No annotator token detected. Result will be saved locally only — upload manually.
+</div>
+{% endif %}
+
+<form id="upload-form" method="POST"
+      class="rounded-3xl border border-secondary p-6 space-y-4 overflow-hidden">
+    <input type="hidden" name="job_id" id="job_id">
+
+    <div>
+        <label class="label"><span class="label-text">Model name</span></label>
+        <input type="text" name="model_name" class="input input-bordered w-full"
+               placeholder="e.g. Trench_A_2026_05">
+    </div>
+
+    <div>
+        <label class="label">
+            <span class="label-text">Photos</span>
+            <span class="label-text-alt opacity-60">markers detected on upload</span>
+        </label>
+        <input type="file" name="photos" multiple accept="image/*"
+               class="file-input file-input-bordered w-full">
+        <p id="upload-status" class="text-sm mt-2 opacity-70"></p>
+        <a id="review-btn" target="_blank" rel="noopener"
+           class="btn btn-outline btn-sm mt-2 hidden">Review / place markers ↗</a>
+    </div>
+
+    <div class="rounded-2xl border border-secondary p-4 space-y-3">
+        <p class="text-sm font-semibold opacity-80">Processing flags
+            <span class="opacity-50 font-normal">— dev, tune individually</span></p>
+        <div class="grid grid-cols-2 gap-3">
+            <div>
+                <label class="label py-1"><span class="label-text text-sm">Features <code class="opacity-60">-p</code></span></label>
+                <select name="feature_preset" class="select select-bordered select-sm w-full">
+                    <option>NORMAL</option><option selected>HIGH</option><option>ULTRA</option>
+                </select>
+            </div>
+            <div>
+                <label class="label py-1"><span class="label-text text-sm">SfM <code class="opacity-60">--sfm_engine</code></span></label>
+                <select name="sfm_engine" class="select select-bordered select-sm w-full">
+                    <option selected>INCREMENTAL</option><option>GLOBAL</option>
+                </select>
+            </div>
+            <div>
+                <label class="label py-1"><span class="label-text text-sm">Densify <code class="opacity-60">--resolution-level</code></span></label>
+                <select name="resolution_level" class="select select-bordered select-sm w-full">
+                    <option value="0">0 — full</option>
+                    <option value="1" selected>1 — half</option>
+                    <option value="2">2 — quarter</option>
+                </select>
+            </div>
+            <div>
+                <label class="label py-1"><span class="label-text text-sm">Densify <code class="opacity-60">--max-resolution</code> px</span></label>
+                <input type="number" name="max_resolution" value="2560" class="input input-bordered input-sm w-full">
+            </div>
+            <div>
+                <label class="label py-1"><span class="label-text text-sm">Mesh <code class="opacity-60">--edge-length</code> m (0=off)</span></label>
+                <input type="number" step="any" name="edge_length" value="0" class="input input-bordered input-sm w-full">
+            </div>
+            <div>
+                <label class="label py-1"><span class="label-text text-sm">Texture <code class="opacity-60">--max-texture-size</code></span></label>
+                <select name="texture_size" class="select select-bordered select-sm w-full">
+                    <option value="4096">4096</option>
+                    <option value="8192" selected>8192</option>
+                    <option value="16384">16384</option>
+                </select>
+            </div>
+            <div>
+                <label class="label py-1"><span class="label-text text-sm">Georef RANSAC threshold (m)</span></label>
+                <input type="number" step="any" name="ransac_threshold" value="0.05" class="input input-bordered input-sm w-full">
+            </div>
+        </div>
+    </div>
+
+    <div>
+        <label class="label">
+            <span class="label-text">Ground control points (optional)</span>
+            <span class="label-text-alt opacity-60">AprilTag 36h11</span>
+        </label>
+        <p class="text-xs opacity-60 mb-2">
+            Enter surveyed coordinates by marker ID. Detection runs automatically on
+            upload — use "Review / place markers" to check or fix them. Leave empty to
+            skip georeferencing.
+        </p>
+        <input type="text" name="gcp_crs"
+               class="input input-bordered input-sm w-full mb-2"
+               placeholder="Coordinate system, e.g. EPSG:32633" value="EPSG:32633">
+        <div id="gcp-rows" class="space-y-2"></div>
+        <button type="button" id="add-gcp" class="btn btn-xs btn-outline mt-2">
+            + Add GCP
+        </button>
+
+        <!-- Shared coordinate offset: models using the same preset align in Blender -->
+        <div class="mt-4">
+            <label class="label py-1">
+                <span class="label-text text-sm">Coordinate offset</span>
+                <span class="label-text-alt opacity-60">shared local origin</span>
+            </label>
+            <div class="flex gap-2">
+                <select name="offset_preset" id="offset-preset" class="select select-bordered select-sm flex-1">
+                    <option value="">Auto (centroid)</option>
+                    {% for name in offset_presets or [] %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+                </select>
+                <button type="button" id="add-offset" class="btn btn-sm btn-outline">+ Preset</button>
+            </div>
+            <div id="offset-form" class="hidden mt-2 grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-2 items-center">
+                <input id="off-name" placeholder="Preset name" class="input input-bordered input-sm">
+                <input id="off-x" type="number" step="any" placeholder="X" class="input input-bordered input-sm">
+                <input id="off-y" type="number" step="any" placeholder="Y" class="input input-bordered input-sm">
+                <input id="off-z" type="number" step="any" placeholder="Z" class="input input-bordered input-sm">
+                <button type="button" id="off-save" class="btn btn-sm btn-primary">Save</button>
+            </div>
+            <p class="text-xs opacity-60 mt-1">
+                Subtracts a fixed origin so multiple models share one frame (align in Blender).
+                "Auto" centres on the markers. Real-world = local + offset.
+            </p>
+        </div>
+    </div>
+
+    <button type="submit" id="submit-btn" class="btn btn-primary w-full" disabled>
+        Start job
+    </button>
+</form>
+
+<script>
+    const fileInput = document.querySelector('input[name="photos"]');
+    const jobId     = document.getElementById("job_id");
+    const status    = document.getElementById("upload-status");
+    const reviewBtn = document.getElementById("review-btn");
+    const startBtn  = document.getElementById("submit-btn");
+
+    // Upload on selection -> detect markers -> enable review + start.
+    fileInput.addEventListener("change", async () => {
+        if (!fileInput.files.length) return;
+        status.textContent = `Uploading ${fileInput.files.length} photo(s)…`;
+        startBtn.disabled = true; reviewBtn.classList.add("hidden");
+        const fd = new FormData();
+        for (const f of fileInput.files) fd.append("photos", f);
+        try {
+            const r = await fetch("/api/upload", {method: "POST", body: fd});
+            const d = await r.json();
+            if (!r.ok) throw new Error(d.error || "upload failed");
+            jobId.value = d.job_id;
+            fileInput.value = "";              // uploaded already — don't resend on submit
+            status.textContent =
+                `${d.n_images} photos uploaded · ${d.n_markers} marker ID(s) across ${d.n_with_markers} image(s)`;
+            reviewBtn.href = `/jobs/${d.job_id}/gcp`;
+            reviewBtn.classList.remove("hidden");
+            startBtn.disabled = false;
+        } catch (e) {
+            status.textContent = "Upload failed: " + e.message;
+        }
+    });
+
+    document.getElementById("upload-form").addEventListener("submit", (e) => {
+        if (!jobId.value) { e.preventDefault(); status.textContent = "Select photos first."; return; }
+        startBtn.disabled = true; startBtn.textContent = "Starting…";
+    });
+
+    function addGcpRow(id = "", x = "", y = "", z = "") {
+        const row = document.createElement("div");
+        row.className = "grid grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 items-center";
+        row.innerHTML = `
+            <input type="number" name="gcp_id" value="${id}" placeholder="ID" class="input input-bordered input-sm w-full">
+            <input type="number" step="any" name="gcp_x" value="${x}" placeholder="X / East" class="input input-bordered input-sm w-full">
+            <input type="number" step="any" name="gcp_y" value="${y}" placeholder="Y / North" class="input input-bordered input-sm w-full">
+            <input type="number" step="any" name="gcp_z" value="${z}" placeholder="Z" class="input input-bordered input-sm w-full">
+            <button type="button" class="btn btn-xs btn-ghost">✕</button>`;
+        row.querySelector("button").onclick = () => row.remove();
+        document.getElementById("gcp-rows").appendChild(row);
+    }
+    document.getElementById("add-gcp").addEventListener("click", () => addGcpRow());
+
+    // Offset preset: toggle the add-form, save a new preset.
+    document.getElementById("add-offset").onclick = () =>
+        document.getElementById("offset-form").classList.toggle("hidden");
+    document.getElementById("off-save").onclick = async () => {
+        const name = document.getElementById("off-name").value.trim();
+        const x = document.getElementById("off-x").value,
+              y = document.getElementById("off-y").value,
+              z = document.getElementById("off-z").value;
+        if (!name || x === "" || y === "" || z === "") return;
+        const r = await fetch("/api/offset-presets", {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({name, offset: [+x, +y, +z]})});
+        if (r.ok) {
+            const sel = document.getElementById("offset-preset");
+            sel.insertAdjacentHTML("beforeend", `<option value="${name}">${name}</option>`);
+            sel.value = name;
+            document.getElementById("offset-form").classList.add("hidden");
+            ["off-name","off-x","off-y","off-z"].forEach(i => document.getElementById(i).value = "");
+        }
+    };
+
+    // Retry: prefill every prior setting and reuse the already-uploaded photos.
+    const PREFILL = {{ prefill|tojson }};
+    if (PREFILL) {
+        document.querySelector('[name="model_name"]').value = PREFILL.model_name || "";
+        for (const [k, v] of Object.entries(PREFILL.options || {})) {
+            const el = document.querySelector(`[name="${k}"]`);
+            if (el) el.value = v;
+        }
+        document.querySelector('[name="gcp_crs"]').value = PREFILL.crs || "";
+        for (const [id, c] of Object.entries(PREFILL.gcp_coords || {}))
+            addGcpRow(id, c[0], c[1], c[2]);
+        if (PREFILL.offset_preset)
+            document.getElementById("offset-preset").value = PREFILL.offset_preset;
+        // Photos already on the server from the prior run — no re-upload needed.
+        jobId.value = PREFILL.job_id;
+        status.textContent =
+            `${PREFILL.photo_count} photos from previous run — adjust settings and start`;
+        reviewBtn.href = `/jobs/${PREFILL.job_id}/gcp`;
+        reviewBtn.classList.remove("hidden");
+        startBtn.disabled = false;
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mb-4">
+  <h2 class="text-2xl font-bold">Ground control points</h2>
+  <p class="text-sm opacity-70 mt-1">Job {{ job_id }} · place / confirm markers, then save</p>
+</div>
+
+<div class="grid grid-cols-[1fr_320px] gap-4">
+  <!-- viewer -->
+  <div class="rounded-2xl border border-secondary overflow-hidden bg-base-200">
+    <div class="flex items-center gap-2 px-3 py-2 border-b border-secondary text-sm">
+      <button id="prev" class="btn btn-xs btn-outline">◀</button>
+      <span id="imgname" class="font-mono opacity-80"></span>
+      <span class="flex-grow"></span>
+      <span class="opacity-60">scroll = zoom · drag = pan · click = place</span>
+      <button id="next" class="btn btn-xs btn-outline">▶</button>
+    </div>
+    <canvas id="cv" class="block w-full" style="height:70vh; cursor:crosshair; touch-action:none"></canvas>
+  </div>
+
+  <!-- panel -->
+  <div class="space-y-4">
+    <div>
+      <label class="label"><span class="label-text">Active marker ID (for manual placement)</span></label>
+      <select id="activeId" class="select select-bordered select-sm w-full"></select>
+      <p class="text-xs opacity-60 mt-1">Detected markers are auto-labelled. Use this only to place a missed one.</p>
+    </div>
+
+    <div>
+      <div class="flex items-center justify-between">
+        <span class="label-text font-semibold">Markers (this image)</span>
+        <span id="imgcount" class="text-xs opacity-60"></span>
+      </div>
+      <div id="markerlist" class="mt-1 space-y-1 text-sm"></div>
+    </div>
+
+    <div>
+      <span class="label-text font-semibold">Coverage (all images)</span>
+      <div id="coverage" class="mt-1 text-xs font-mono opacity-80"></div>
+    </div>
+
+    <button id="save" class="btn btn-primary btn-sm w-full">Save</button>
+    <p id="status" class="text-xs opacity-70"></p>
+  </div>
+</div>
+
+<script>
+const JOB = "{{ job_id }}";
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+let images = [];          // [filename]
+let idx = 0;              // current image index
+let det = {};             // {filename: [{id,cx,cy}]}  auto-detected
+let manual = {};          // {filename: {id:[x,y]}}    user placed
+let rejected = {};        // {filename: Set(id)}       rejected false detections
+const isRej = (fn,id) => (rejected[fn] && rejected[fn].has(id));
+let img = new Image();
+let view = {scale:1, ox:0, oy:0};   // zoom/pan
+
+function fit() {                      // fit image to canvas
+  const r = cv.getBoundingClientRect();
+  cv.width = r.width; cv.height = r.height;
+  const s = Math.min(cv.width/img.width, cv.height/img.height);
+  view = {scale:s, ox:(cv.width-img.width*s)/2, oy:(cv.height-img.height*s)/2};
+}
+const toScreen = (x,y) => [x*view.scale+view.ox, y*view.scale+view.oy];
+const toImage  = (sx,sy) => [(sx-view.ox)/view.scale, (sy-view.oy)/view.scale];
+
+function draw() {
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.drawImage(img, view.ox, view.oy, img.width*view.scale, img.height*view.scale);
+  const fn = images[idx];
+  (det[fn]||[]).forEach(m => { if(!isRej(fn,m.id)) marker(m.cx, m.cy, m.id); });
+  Object.entries(manual[fn]||{}).forEach(([id,[x,y]]) => marker(x, y, id));
+}
+function marker(ix,iy,id){
+  const [x,y]=toScreen(ix,iy);              // exact marker centre
+  ctx.beginPath(); ctx.arc(x,y,10,0,7);
+  ctx.fillStyle="#fff"; ctx.fill();
+  ctx.strokeStyle="#000"; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.fillStyle="#000"; ctx.font="bold 10px sans-serif";
+  ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillText(id, x, y);
+}
+
+function loadImage(){
+  const fn = images[idx];
+  document.getElementById("imgname").textContent = fn;
+  img = new Image();
+  img.onload = () => { fit(); draw(); refreshPanel(); };
+  img.src = `/uploads/${JOB}/${fn}`;
+}
+
+function refreshPanel(){
+  const fn = images[idx];
+  const d = det[fn]||[], m = manual[fn]||{};
+  const rej = d.filter(x=>isRej(fn,x.id)).length;
+  document.getElementById("imgcount").textContent =
+    `${d.length-rej} kept${rej?` · ${rej} rejected`:''} · ${Object.keys(m).length} manual`;
+  const ml = document.getElementById("markerlist"); ml.innerHTML="";
+  d.forEach(x => {
+    if (isRej(fn, x.id)) return;     // rejected -> hidden
+    ml.insertAdjacentHTML("beforeend",
+      `<div class="flex justify-between">
+         <span>ID ${x.id} <span class="opacity-50">auto</span></span>
+         <button data-rej="${x.id}" class="opacity-60 hover:opacity-100">✕</button>
+       </div>`);
+  });
+  Object.keys(m).forEach(id => ml.insertAdjacentHTML("beforeend",
+    `<div class="flex justify-between"><span>ID ${id} <span class="opacity-50">manual</span></span><button data-man="${id}" class="opacity-60 hover:opacity-100">✕</button></div>`));
+  ml.querySelectorAll("[data-rej]").forEach(b => b.onclick=()=>{
+    (rejected[fn] ||= new Set()).add(+b.dataset.rej); refreshPanel(); draw(); });
+  ml.querySelectorAll("[data-man]").forEach(b => b.onclick=()=>{ delete manual[fn][b.dataset.man]; refreshPanel(); draw(); });
+  // coverage across all images (rejected detections excluded)
+  const cov={};
+  images.forEach(f => { (det[f]||[]).forEach(x=>{ if(!isRej(f,x.id)) cov[x.id]=(cov[x.id]||0)+1; });
+                        Object.keys(manual[f]||{}).forEach(id=>cov[id]=(cov[id]||0)+1); });
+  document.getElementById("coverage").innerHTML =
+    Object.keys(cov).sort((a,b)=>a-b).map(id=>{
+      const n=cov[id], weak=n<3?' style="color:#dc2626"':'';
+      return `<div${weak}>ID ${id}: ${n} img${weak?' ⚠':''}</div>`;}).join("") || "none yet";
+}
+
+// interactions
+let drag=null, moved=false;
+cv.addEventListener("mousedown", e=>{ const r=cv.getBoundingClientRect(); drag={x:e.clientX-r.left,y:e.clientY-r.top}; moved=false; });
+cv.addEventListener("mousemove", e=>{ if(!drag) return;
+  const r=cv.getBoundingClientRect(), x=e.clientX-r.left, y=e.clientY-r.top;
+  view.ox+=x-drag.x; view.oy+=y-drag.y; drag={x,y}; moved=true; draw(); });
+cv.addEventListener("mouseup", e=>{
+  const r=cv.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
+  if(!moved){ const id=document.getElementById("activeId").value;
+    if(id){ const [ix,iy]=toImage(sx,sy); (manual[images[idx]] ||= {})[id]=[Math.round(ix),Math.round(iy)]; refreshPanel(); draw(); } }
+  drag=null;
+});
+cv.addEventListener("wheel", e=>{ e.preventDefault(); const r=cv.getBoundingClientRect(), sx=e.clientX-r.left, sy=e.clientY-r.top;
+  const [ix,iy]=toImage(sx,sy); const f=e.deltaY<0?1.15:1/1.15; view.scale*=f;
+  view.ox=sx-ix*view.scale; view.oy=sy-iy*view.scale; draw(); }, {passive:false});
+document.getElementById("prev").onclick=()=>{ idx=(idx-1+images.length)%images.length; loadImage(); };
+document.getElementById("next").onclick=()=>{ idx=(idx+1)%images.length; loadImage(); };
+
+document.getElementById("save").onclick=async()=>{
+  const st=document.getElementById("status"); st.textContent="saving...";
+  // resolved observations = accepted detections (excl. rejected) + manual (manual overrides)
+  const obs={};
+  images.forEach(fn=>{
+    const o={};
+    (det[fn]||[]).forEach(m=>{ if(!isRej(fn,m.id)) o[m.id]=[m.cx,m.cy]; });
+    Object.entries(manual[fn]||{}).forEach(([id,xy])=>o[id]=xy);
+    if(Object.keys(o).length) obs[fn]=o;
+  });
+  const r=await fetch(`/api/jobs/${JOB}/observations`,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({observations:obs})});
+  st.textContent = r.ok ? `saved ✓ (${Object.keys(obs).length} images)` : "save failed";
+};
+
+// boot
+(async()=>{
+  const r=await fetch(`/api/jobs/${JOB}/markers`); const data=await r.json();
+  images=data.images; det=data.detected||{};
+  const ids=[...new Set(Object.values(det).flat().map(m=>m.id))].sort((a,b)=>a-b);
+  document.getElementById("activeId").innerHTML =
+    `<option value="">— select —</option>` + ids.map(i=>`<option>${i}</option>`).join("");
+  if(images.length) loadImage();
+})();
+</script>
+{% endblock %}

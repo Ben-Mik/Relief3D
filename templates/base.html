@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html data-theme="paper" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Relief3D</title>
+    <!-- Built stylesheet (production). If absent (dev), fall back to Tailwind+daisyUI CDN. -->
+    <link href="{{ url_for('static', filename='tailwind.css') }}" rel="stylesheet"
+          onerror="this.remove();
+            var t=document.createElement('script');t.src='https://cdn.tailwindcss.com';document.head.appendChild(t);
+            var d=document.createElement('link');d.rel='stylesheet';
+            d.href='https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css';document.head.appendChild(d);"/>
+</head>
+<body class="bg-base-100 text-base-content min-h-screen">
+    <header class="sticky top-0 z-10 flex h-16 w-full bg-base-100 border-b border-secondary items-center px-6 gap-4">
+        <a href="{{ url_for('index') }}" class="text-xl font-bold">Relief3D</a>
+        <div class="flex-grow"></div>
+        <a href="{{ url_for('history') }}" class="btn btn-primary btn-sm">Job history</a>
+    </header>
+    <main class="max-w-3xl mx-auto p-6">
+        {% block content %}{% endblock %}
+    </main>
+    <script>
+        // Clickable "Reupload" flags (job page + history). POST then reload.
+        // stopPropagation keeps a history-card click from following the card link.
+        document.addEventListener("click", async (e) => {
+            const el = e.target.closest(".reupload");
+            if (!el) return;
+            e.preventDefault(); e.stopPropagation();
+            el.textContent = "…"; el.classList.add("pointer-events-none");
+            try { await fetch(el.dataset.url, {method: "POST"}); }
+            finally { location.reload(); }
+        });
+        // Clickable "Retry" flags — navigate to the prefilled new-job form.
+        document.addEventListener("click", (e) => {
+            const el = e.target.closest(".retry");
+            if (!el) return;
+            e.preventDefault(); e.stopPropagation();
+            window.location = el.dataset.url;
+        });
+    </script>
+</body>
+</html>

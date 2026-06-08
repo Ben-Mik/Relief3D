@@ -156,7 +156,7 @@
             fileInput.value = "";              // uploaded already — don't resend on submit
             status.textContent =
                 `${d.n_images} photos uploaded · ${d.n_markers} marker ID(s) across ${d.n_with_markers} image(s)`;
-            reviewBtn.href = `/jobs/${d.job_id}/gcp`;
+            reviewBtn.href = "{{ url_for('gcp_tool', job_id='__JOB__') }}".replace('__JOB__', d.job_id);
             reviewBtn.classList.remove("hidden");
             startBtn.disabled = false;
         } catch (e) {
@@ -221,7 +221,7 @@
         jobId.value = PREFILL.job_id;
         status.textContent =
             `${PREFILL.photo_count} photos from previous run — adjust settings and start`;
-        reviewBtn.href = `/jobs/${PREFILL.job_id}/gcp`;
+        reviewBtn.href = "{{ url_for('gcp_tool', job_id='__JOB__') }}".replace('__JOB__', PREFILL.job_id);
         reviewBtn.classList.remove("hidden");
         startBtn.disabled = false;
     }

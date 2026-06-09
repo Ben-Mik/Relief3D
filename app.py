@@ -189,6 +189,7 @@ def new_job(project_id):
         options = {
             "feature_preset": request.form.get("feature_preset", "HIGH"),
             "sfm_engine": request.form.get("sfm_engine", "INCREMENTAL"),
+            "max_image_pct": int(request.form.get("max_image_pct") or 0),
             "resolution_level": int(request.form.get("resolution_level", 1)),
             "max_resolution": int(request.form.get("max_resolution", 2560)),
             "edge_length": float(request.form.get("edge_length") or 0),
@@ -487,6 +488,7 @@ def _write_report(output_dir, job_id, options, report):
         "--------",
         f"Features (-p):            {o['feature_preset']}",
         f"SfM engine:               {o['sfm_engine']}",
+        f"Input image scale:        {str(o['max_image_pct']) + '%' if o['max_image_pct'] else 'full'}",
         f"Densify resolution-level: {o['resolution_level']}",
         f"Densify max-resolution:   {o['max_resolution']} px",
         f"Mesh edge-length:         {edge} m" + ("" if edge else " (off)"),

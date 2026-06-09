@@ -32,14 +32,55 @@ def _run(work_dir, shell, progress=None, stage=""):
     return r.stdout
 
 
+_IMG_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
+
+
+def _downscale_images(work_dir, pct, observations):
+    """Downscale the pipeline's working images to `pct`% of their dimensions,
+       preserving EXIF. OpenMVG reads focal length + camera model from EXIF and
+       re-derives the pixel focal from the (new) image width, so the camera
+       intrinsics stay correct after resizing. Marker observations are in
+       original-pixel space, so scale them by the same factor.
+       Returns the (possibly scaled) observations; input is left untouched."""
+    if not pct or pct >= 100:
+        return observations
+    factor = pct / 100.0
+    img_dir = os.path.join(work_dir, "images")
+    for name in os.listdir(img_dir):
+        if not name.lower().endswith(_IMG_EXTS):
+            continue
+        path = os.path.join(img_dir, name)
+        im = Image.open(path)
+        exif = im.info.get("exif")
+        new = (max(1, round(im.width * factor)), max(1, round(im.height * factor)))
+        im = im.resize(new, Image.LANCZOS)
+        kw = {"quality": 95}
+        if exif:
+            kw["exif"] = exif
+        im.save(path, **kw)
+    if not observations:
+        return observations
+    return {fn: {mid: [xy[0] * factor, xy[1] * factor] for mid, xy in marks.items()}
+            for fn, marks in observations.items()}
+
+
 def reconstruct(work_dir, options, gcp_coords=None, observations=None,
                 preset_offset=None, progress=None):
     """Full pipeline. Photos must already be at  work_dir/images.
        Returns {"mesh_path": <obj>, "georef": <report dict>}.
-       options: feature_preset, sfm_engine, resolution_level, max_resolution,
-                edge_length, decimate, texture_out_size, ransac_threshold."""
+       options: feature_preset, sfm_engine, max_image_pct, resolution_level,
+                max_resolution, edge_length, decimate, texture_out_size,
+                ransac_threshold."""
     o = options
     M, R = "ovg/matches", "ovg/recon"
+
+    # Downscale the working images first (markers were detected full-res at
+    # upload). This is the main SfM speed lever and sets the texture-source
+    # ceiling; OpenMVS then auto-sizes the texture atlas to match.
+    if progress:
+        progress("Preparing images")
+    observations = _downscale_images(
+        work_dir, int(o.get("max_image_pct") or 0), observations)
 
     # ---- OpenMVG SfM (-> sfm_data.json incl. structure, for georef + transform) ----
     sfm = (
@@ -87,18 +128,21 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
     )
     _run(work_dir, mvs, progress, "Dense / mesh / texture")
 
-    # Post-process: downsample texture pages to user-requested size.
-    # TextureMesh picks its own atlas size based on input images; we resize
-    # after the fact so UV quality is never capped during processing.
+    # Post-process: resize texture pages to the user-requested size. OpenMVS
+    # auto-sizes the atlas during texturing (so UV quality is never capped at
+    # processing time); this is a final, absolute resize. It scales up as well
+    # as down — an upscaled atlas can help the annotator's pixel-based picking.
+    # Aspect-preserving (longest edge = tex_size) so UVs never distort.
     tex_size = int(o.get("texture_out_size") or 0)
     if tex_size > 0:
         if progress:
             progress("Resizing texture")
         for tex in glob.glob(os.path.join(work_dir, "mvs", "scene_dense_texture*.png")):
             img = Image.open(tex)
-            if img.width > tex_size or img.height > tex_size:
-                img = img.resize((tex_size, tex_size), Image.LANCZOS)
-                img.save(tex)
+            scale = tex_size / max(img.width, img.height)
+            if scale != 1:
+                new = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
+                img.resize(new, Image.LANCZOS).save(tex)
 
     return {
         "mesh_path": os.path.join(work_dir, "mvs", "scene_dense_texture.obj"),

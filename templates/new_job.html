@@ -54,6 +54,16 @@
                 </select>
             </div>
             <div>
+                <label class="label py-1"><span class="label-text text-sm">Max image size</span></label>
+                <select name="max_image_pct" class="select select-bordered select-sm w-full">
+                    <option value="0">Full</option>
+                    <option value="80">High — 80%</option>
+                    <option value="50" selected>Medium — 50%</option>
+                    <option value="30">Low — 30%</option>
+                    <option value="15">Preview — 15%</option>
+                </select>
+            </div>
+            <div>
                 <label class="label py-1"><span class="label-text text-sm">Densify <code class="opacity-60">--resolution-level</code></span></label>
                 <select name="resolution_level" class="select select-bordered select-sm w-full">
                     <option value="0">0 — full</option>

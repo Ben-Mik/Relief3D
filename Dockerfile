@@ -62,6 +62,7 @@ RUN sed -i 's/COMPONENTS iostreams program_options system serialization/COMPONEN
         -DVCG_ROOT=/opt/vcglib \
         -DOpenMVS_USE_CUDA=OFF \
         -DOpenMVS_USE_OPENMP=ON \
+        -DOpenMVS_USE_PYTHON=OFF \
 
     && make -j"$(nproc)" \
     && make install \

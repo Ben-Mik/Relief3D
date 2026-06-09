@@ -129,4 +129,4 @@ COPY --from=css-builder /build/output.css ./static/tailwind.css
 
 ENV PYTHONUNBUFFERED=1 RELIEF3D_DATA=/data
 EXPOSE 5002
-CMD ["gunicorn", "--bind", "0.0.0.0:5002", "--workers", "2", "--timeout", "0", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5002", "--workers", "1", "--timeout", "0", "app:app"]

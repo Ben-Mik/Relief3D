@@ -185,6 +185,18 @@ def new_job(project_id):
             job_output_dir = f"{base}_{suffix}"
             suffix += 1
         os.makedirs(job_output_dir)
+        # Mesh simplification is one OpenMVS Clean() pass, so the two levers are
+        # mutually exclusive: the UI picks a mode and only that one is honored.
+        # "ratio" % is "how much to remove" → decimate = fraction to keep.
+        mode = request.form.get("simplify_mode", "off")
+        if mode == "ratio":
+            pct = min(max(float(request.form.get("simplify_pct") or 0), 0), 95)
+            edge_length, decimate = 0.0, round(1 - pct / 100, 3) if pct > 0 else 0.0
+        elif mode == "metric":
+            edge_length, decimate = float(request.form.get("simplify_edge") or 0), 0.0
+        else:
+            edge_length, decimate = 0.0, 0.0
+
         # Engine flags (per-flag dev controls). Cast numerics.
         options = {
             "feature_preset": request.form.get("feature_preset", "HIGH"),
@@ -192,8 +204,8 @@ def new_job(project_id):
             "max_image_pct": int(request.form.get("max_image_pct") or 0),
             "resolution_level": int(request.form.get("resolution_level", 1)),
             "max_resolution": int(request.form.get("max_resolution", 2560)),
-            "edge_length": float(request.form.get("edge_length") or 0),
-            "decimate": float(request.form.get("decimate") or 0),
+            "edge_length": edge_length,
+            "decimate": decimate,
             "texture_out_size": int(request.form.get("texture_out_size") or 0),
             "ransac_threshold": float(request.form.get("ransac_threshold") or 0.05),
         }

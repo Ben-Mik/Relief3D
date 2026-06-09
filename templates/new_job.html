@@ -76,20 +76,18 @@
                 <input type="number" name="max_resolution" value="2560" class="input input-bordered input-sm w-full">
             </div>
             <div>
-                <label class="label py-1"><span class="label-text text-sm">Mesh simplification</span></label>
-                <select name="simplify_mode" id="simplify-mode" class="select select-bordered select-sm w-full">
-                    <option value="off" selected>Off</option>
-                    <option value="ratio">By amount (%)</option>
-                    <option value="metric">By triangle size (m)</option>
-                </select>
-            </div>
-            <div id="simplify-pct-wrap" class="hidden">
-                <label class="label py-1"><span class="label-text text-sm">Simplify by <span class="opacity-60">(higher = lighter)</span></span></label>
-                <input type="number" step="any" min="0" max="95" name="simplify_pct" value="70" class="input input-bordered input-sm w-full" placeholder="% to remove">
-            </div>
-            <div id="simplify-edge-wrap" class="hidden">
-                <label class="label py-1"><span class="label-text text-sm">Triangle size <span class="opacity-60">(needs GCPs)</span></span></label>
-                <input type="number" step="any" min="0" name="simplify_edge" value="0.01" class="input input-bordered input-sm w-full" placeholder="metres, e.g. 0.01">
+                <label class="label py-1 gap-2">
+                    <span class="label-text text-sm">Mesh simplification</span>
+                    <span class="inline-flex text-xs rounded overflow-hidden border border-secondary">
+                        <button type="button" id="simp-off" class="px-2 py-0.5 bg-primary text-primary-content">off</button>
+                        <button type="button" id="simp-pct" class="px-2 py-0.5">%</button>
+                        <button type="button" id="simp-m"   class="px-2 py-0.5">m</button>
+                    </span>
+                </label>
+                <input type="number" id="simp-val" step="any" min="0" max="99"
+                       class="input input-bordered input-sm w-full hidden" placeholder="0 = off">
+                <input type="hidden" name="decimate" id="simp-decimate" value="0">
+                <input type="hidden" name="edge_length" id="simp-edge" value="0">
             </div>
             <div>
                 <label class="label py-1"><span class="label-text text-sm">Texture output size</span></label>
@@ -164,16 +162,46 @@
     const reviewBtn = document.getElementById("review-btn");
     const startBtn  = document.getElementById("submit-btn");
 
-    // Mesh simplification: show only the input for the chosen mode, so the
-    // ratio and metric levers are mutually exclusive (they share OpenMVS's
-    // Clean() pass and would otherwise fight each other).
-    const simplifyMode = document.getElementById("simplify-mode");
-    function syncSimplify() {
-        document.getElementById("simplify-pct-wrap").classList.toggle("hidden", simplifyMode.value !== "ratio");
-        document.getElementById("simplify-edge-wrap").classList.toggle("hidden", simplifyMode.value !== "metric");
+    // Mesh simplification toggle: off / % / m
+    // % → decimate: user types 0–99 (% to remove), sent as (100-val)/100
+    // m → edge-length: user types metres directly
+    let simpMode = "off";
+    const simpVal     = document.getElementById("simp-val");
+    const simpDecimate= document.getElementById("simp-decimate");
+    const simpEdge    = document.getElementById("simp-edge");
+    const simpBtns    = {off: document.getElementById("simp-off"),
+                         pct: document.getElementById("simp-pct"),
+                         m:   document.getElementById("simp-m")};
+    function setSimpMode(mode) {
+        simpMode = mode;
+        Object.entries(simpBtns).forEach(([k,b]) => {
+            b.classList.toggle("bg-primary", k === mode);
+            b.classList.toggle("text-primary-content", k === mode);
+        });
+        simpVal.classList.toggle("hidden", mode === "off");
+        if (mode === "off") {
+            simpVal.removeAttribute("max"); simpVal.placeholder = "";
+            simpDecimate.value = "0"; simpEdge.value = "0";
+        } else if (mode === "pct") {
+            simpVal.max = "99"; simpVal.step = "1"; simpVal.placeholder = "% to remove, e.g. 70";
+        } else {
+            simpVal.removeAttribute("max"); simpVal.step = "any"; simpVal.placeholder = "metres, e.g. 0.01";
+        }
+        updateSimpHidden();
     }
-    simplifyMode.addEventListener("change", syncSimplify);
-    syncSimplify();
+    function updateSimpHidden() {
+        const v = parseFloat(simpVal.value) || 0;
+        if (simpMode === "pct") {
+            simpDecimate.value = v > 0 ? ((100 - Math.min(v, 99)) / 100).toFixed(4) : "0";
+            simpEdge.value = "0";
+        } else if (simpMode === "m") {
+            simpEdge.value = v > 0 ? v : "0";
+            simpDecimate.value = "0";
+        }
+    }
+    simpVal.addEventListener("input", updateSimpHidden);
+    Object.entries(simpBtns).forEach(([k,b]) => b.addEventListener("click", () => setSimpMode(k)));
+    setSimpMode("off");
 
     // Upload on selection -> detect markers -> enable review + start.
     fileInput.addEventListener("change", async () => {
@@ -246,16 +274,13 @@
             const el = document.querySelector(`[name="${k}"]`);
             if (el) el.value = v;
         }
-        // Reconstruct the mesh-simplification mode from the stored decimate/edge.
+        // Reconstruct mesh-simplification toggle from stored decimate/edge.
         const opt = PREFILL.options || {};
         if (opt.edge_length > 0) {
-            simplifyMode.value = "metric";
-            document.querySelector('[name="simplify_edge"]').value = opt.edge_length;
+            setSimpMode("m"); simpVal.value = opt.edge_length; updateSimpHidden();
         } else if (opt.decimate > 0 && opt.decimate < 1) {
-            simplifyMode.value = "ratio";
-            document.querySelector('[name="simplify_pct"]').value = Math.round((1 - opt.decimate) * 100);
+            setSimpMode("pct"); simpVal.value = Math.round((1 - opt.decimate) * 100); updateSimpHidden();
         }
-        syncSimplify();
         document.querySelector('[name="gcp_crs"]').value = PREFILL.crs || "";
         for (const [id, c] of Object.entries(PREFILL.gcp_coords || {}))
             addGcpRow(id, c[0], c[1], c[2]);

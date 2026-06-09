@@ -177,9 +177,9 @@
             b.classList.toggle("text-primary-content", k === mode);
         });
         if (mode === "pct") {
-            simpVal.max = "100"; simpVal.step = "1"; simpVal.placeholder = "0 = off, e.g. 70";
+            simpVal.max = "100"; simpVal.step = "1"; simpVal.placeholder = "0 = off";
         } else {
-            simpVal.removeAttribute("max"); simpVal.step = "any"; simpVal.placeholder = "0 = off, e.g. 0.01";
+            simpVal.removeAttribute("max"); simpVal.step = "any"; simpVal.placeholder = "0 = off";
         }
         updateSimpHidden();
     }

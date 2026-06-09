@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libpng-dev libjpeg-dev libtiff-dev \
         libxxf86vm-dev libxi-dev libxrandr-dev \
         libeigen3-dev \
-        libboost-all-dev \
+        libboost1.83-all-dev \
         libnanoflann-dev \
         libopencv-dev \
         libcgal-dev \
@@ -58,7 +58,7 @@ RUN cmake /opt/openMVS \
         -DVCG_ROOT=/opt/vcglib \
         -DOpenMVS_USE_CUDA=OFF \
         -DOpenMVS_USE_OPENMP=ON \
-        -DBoost_NO_BOOST_CMAKE=ON \
+
     && make -j"$(nproc)" \
     && make install \
     && ldconfig
@@ -94,8 +94,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libceres4t64 libcholmod5 libcxsparse4 libspqr4 libblas3 liblapack3 \
         libglu1-mesa \
         libxxf86vm1 libxi6 libxrandr2 \
-        libboost-iostreams1.90.0 libboost-program-options1.90.0 \
-        libboost-serialization1.90.0 libboost-filesystem1.90.0 \
+        libboost-iostreams1.83.0 libboost-program-options1.83.0 \
+        libboost-serialization1.83.0 libboost-system1.83.0 libboost-filesystem1.83.0 \
         libopencv-core410 libopencv-imgproc410 libopencv-imgcodecs410 \
         libopencv-calib3d410 libopencv-features2d410 libopencv-flann410 \
         python3 python3-pip \

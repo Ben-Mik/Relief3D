@@ -124,7 +124,10 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
         f"cd mvs;"
         f"DensifyPointCloud scene.mvs --resolution-level {o['resolution_level']} --max-resolution {o['max_resolution']};"
         f"ReconstructMesh scene_dense.mvs{edge}{decimate};"
-        f"TextureMesh scene_dense.mvs --mesh-file scene_dense_mesh.ply -o scene_dense_mesh_texture.mvs --export-type obj"
+        # Export PLY (the default): OpenMVS v2.3.0's OBJ writer segfaults during
+        # export on this build, while PLY is reliable. PLY carries UVs + a
+        # sidecar texture PNG; the 3D-Annotator three.js loader takes PLY + PNG.
+        f"TextureMesh scene_dense.mvs --mesh-file scene_dense_mesh.ply -o scene_dense_mesh_texture.mvs"
     )
     _run(work_dir, mvs, progress, "Dense / mesh / texture")
 
@@ -145,6 +148,6 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
                 img.resize(new, Image.LANCZOS).save(tex)
 
     return {
-        "mesh_path": os.path.join(work_dir, "mvs", "scene_dense_mesh_texture.obj"),
+        "mesh_path": os.path.join(work_dir, "mvs", "scene_dense_mesh_texture.ply"),
         "georef": report,
     }

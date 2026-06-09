@@ -106,7 +106,7 @@ def _drop_meshes(d):
     """Remove the heavy textured-mesh files, keeping report.txt. Used after a
        successful (re)upload — the model is then safe in the annotator."""
     for f in os.listdir(d):
-        if f.lower().endswith((".obj", ".mtl", ".png", ".jpg", ".jpeg")):
+        if f.lower().endswith((".ply", ".png", ".jpg", ".jpeg")):
             os.remove(os.path.join(d, f))
 
 
@@ -117,7 +117,7 @@ def _can_reupload(job):
         return False
     d = job.get("output_dir")
     return bool(d) and os.path.isdir(d) and any(
-        f.lower().endswith(".obj") for f in os.listdir(d))
+        f.lower().endswith(".ply") for f in os.listdir(d))
 
 
 def _can_retry(job):
@@ -422,7 +422,7 @@ def sweep_stale_outputs(max_age_h=8):
         if not os.path.isdir(d) or os.path.getmtime(d) >= cutoff:
             continue
         for f in os.listdir(d):
-            if f.lower().endswith((".obj", ".mtl", ".png", ".jpg", ".jpeg")):
+            if f.lower().endswith((".ply", ".png", ".jpg", ".jpeg")):
                 os.remove(os.path.join(d, f))
 
 
@@ -477,15 +477,19 @@ def _write_report(output_dir, job_id, options, report):
        place it back in the world. Mesh stats come from the produced OBJ."""
     job = load_jobs().get(job_id, {})
     o = options
-    obj = next((f for f in os.listdir(output_dir) if f.lower().endswith(".obj")), None)
+    ply = next((f for f in os.listdir(output_dir) if f.lower().endswith(".ply")), None)
     nv = nf = 0
-    if obj:
-        with open(os.path.join(output_dir, obj)) as fh:
-            for line in fh:
-                if line[:2] == "v ":
-                    nv += 1
-                elif line[:2] == "f ":
-                    nf += 1
+    if ply:
+        # PLY headers are ASCII even for binary bodies; read counts from there.
+        with open(os.path.join(output_dir, ply), "rb") as fh:
+            for raw in fh:
+                line = raw.decode("ascii", "ignore").strip()
+                if line.startswith("element vertex"):
+                    nv = int(line.split()[-1])
+                elif line.startswith("element face"):
+                    nf = int(line.split()[-1])
+                elif line == "end_header":
+                    break
     edge = float(o["edge_length"])
     L = [
         "Relief3D processing report",
@@ -534,11 +538,12 @@ def _write_report(output_dir, job_id, options, report):
 
 
 def _zip_textured_mesh(mesh_dir):
-    """In-memory baseFile.zip: obj + mtl + textures, plus report.txt sidecar."""
+    """In-memory baseFile.zip: ply + texture, plus report.txt sidecar.
+       The annotator's three.js loader takes the PLY model + a texture image."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(os.listdir(mesh_dir)):
-            if f.lower().endswith((".obj", ".mtl", ".png", ".jpg", ".jpeg", ".txt")):
+            if f.lower().endswith((".ply", ".png", ".jpg", ".jpeg", ".txt")):
                 z.write(os.path.join(mesh_dir, f), arcname=f)
     buf.seek(0)
     return buf
@@ -588,12 +593,14 @@ def process_relief_job(job_id, upload_dir, output_dir, options, gcp_coords,
                                      preset_offset=preset_offset, progress=progress)
         report = result["georef"]
 
-        # Collect the textured mesh (obj + mtl + texture image) into output_dir.
-        # Key on extension, not name, so the texture is caught whatever OpenMVS calls it.
-        # (mvs top-level images = the texture(s); depth maps are .dmap, undist images are in a subdir.)
+        # Collect the textured mesh (ply + texture image) into output_dir.
+        # Match the textured-output prefix: the mvs dir also holds scene_dense.ply
+        # (dense cloud) and scene_dense_mesh.ply (untextured) — we want only the
+        # scene_dense_mesh_texture.{ply,png} pair (the annotator takes 2 files max).
         mvs = os.path.join(work_dir, "mvs")
         produced = [f for f in os.listdir(mvs)
-                    if f.lower().endswith((".obj", ".mtl", ".png", ".jpg", ".jpeg"))]
+                    if f.startswith("scene_dense_mesh_texture")
+                    and f.lower().endswith((".ply", ".png", ".jpg", ".jpeg"))]
         for f in produced:
             shutil.copy(os.path.join(mvs, f), output_dir)
         # Tag the report with the CRS (held on the job record) so it fully

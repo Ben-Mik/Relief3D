@@ -80,7 +80,7 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
         f"DensifyPointCloud scene.mvs --resolution-level {o['resolution_level']} --max-resolution {o['max_resolution']};"
         f"ReconstructMesh scene_dense.mvs{edge};"
         f"{simplify}"
-        f"TextureMesh scene_dense_mesh.mvs --export-type obj"
+        f"TextureMesh scene_dense.mvs --mesh-file scene_dense_mesh.ply --export-type obj"
     )
     _run(work_dir, mvs, progress, "Dense / mesh / texture")
 
@@ -91,13 +91,13 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
     if tex_size > 0:
         if progress:
             progress("Resizing texture")
-        for tex in glob.glob(os.path.join(work_dir, "mvs", "scene_dense_mesh_texture*.png")):
+        for tex in glob.glob(os.path.join(work_dir, "mvs", "scene_dense_texture*.png")):
             img = Image.open(tex)
             if img.width > tex_size or img.height > tex_size:
                 img = img.resize((tex_size, tex_size), Image.LANCZOS)
                 img.save(tex)
 
     return {
-        "mesh_path": os.path.join(work_dir, "mvs", "scene_dense_mesh_texture.obj"),
+        "mesh_path": os.path.join(work_dir, "mvs", "scene_dense_texture.obj"),
         "georef": report,
     }

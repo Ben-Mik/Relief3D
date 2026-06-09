@@ -525,7 +525,7 @@ def _zip_textured_mesh(mesh_dir):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(os.listdir(mesh_dir)):
-            if f.lower().endswith((".ply", ".png", ".jpg", ".jpeg", ".txt")):
+            if f.lower().endswith((".ply", ".png", ".jpg", ".jpeg")):
                 z.write(os.path.join(mesh_dir, f), arcname=f)
     buf.seek(0)
     return buf

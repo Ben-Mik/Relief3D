@@ -95,8 +95,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libglu1-mesa \
         libxxf86vm1 libxi6 libxrandr2 \
         libboost-iostreams1.90.0 libboost-program-options1.90.0 \
-        libboost-serialization1.90.0 libboost-system1.90.0 \
-        libboost-filesystem1.90.0 \
+        libboost-serialization1.90.0 libboost-filesystem1.90.0 \
         libopencv-core410 libopencv-imgproc410 libopencv-imgcodecs410 \
         libopencv-calib3d410 libopencv-features2d410 libopencv-flann410 \
         python3 python3-pip \

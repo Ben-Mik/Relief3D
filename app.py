@@ -185,27 +185,14 @@ def new_job(project_id):
             job_output_dir = f"{base}_{suffix}"
             suffix += 1
         os.makedirs(job_output_dir)
-        # Mesh simplification is one OpenMVS Clean() pass, so the two levers are
-        # mutually exclusive: the UI picks a mode and only that one is honored.
-        # "ratio" % is "how much to remove" → decimate = fraction to keep.
-        mode = request.form.get("simplify_mode", "off")
-        if mode == "ratio":
-            pct = min(max(float(request.form.get("simplify_pct") or 0), 0), 95)
-            edge_length, decimate = 0.0, round(1 - pct / 100, 3) if pct > 0 else 0.0
-        elif mode == "metric":
-            edge_length, decimate = float(request.form.get("simplify_edge") or 0), 0.0
-        else:
-            edge_length, decimate = 0.0, 0.0
-
-        # Engine flags (per-flag dev controls). Cast numerics.
         options = {
             "feature_preset": request.form.get("feature_preset", "HIGH"),
             "sfm_engine": request.form.get("sfm_engine", "INCREMENTAL"),
             "max_image_pct": int(request.form.get("max_image_pct") or 0),
             "resolution_level": int(request.form.get("resolution_level", 1)),
             "max_resolution": int(request.form.get("max_resolution", 2560)),
-            "edge_length": edge_length,
-            "decimate": decimate,
+            "edge_length": float(request.form.get("edge_length") or 0),
+            "decimate": float(request.form.get("decimate") or 0),
             "texture_out_size": int(request.form.get("texture_out_size") or 0),
             "ransac_threshold": float(request.form.get("ransac_threshold") or 0.05),
         }
@@ -465,16 +452,9 @@ def api_add_offset_preset():
 
 # ---------------------------------------------------------------------------
 # Annotator upload: zip the textured mesh and push it to 3D-Annotator.
-# Contract (verified against ~/3D-Annotator): the three.js loader REQUIRES the
-# MTL and only accepts jpg/jpeg/png textures — so we pack obj + mtl + texture.
-# The model sits in the LOCAL frame; the annotator's ModelData has no geo field,
-# so report.txt (settings + georef + offset) rides along in the zip as the human-
-# readable record of how to map vertices back to real-world coords
-# (real-world = local + offset). The loader ignores the unmatched .txt.
 # ---------------------------------------------------------------------------
 def _write_report(output_dir, job_id, options, report):
-    """Human-readable report.txt shipped with the model: how it was built + how to
-       place it back in the world. Mesh stats come from the produced OBJ."""
+    """Human-readable report.txt shipped with the model: settings + georef + offset."""
     job = load_jobs().get(job_id, {})
     o = options
     ply = next((f for f in os.listdir(output_dir) if f.lower().endswith(".ply")), None)

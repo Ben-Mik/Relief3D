@@ -56,6 +56,7 @@ RUN git clone --recursive --branch v2.4.0 --depth 1 --shallow-submodules \
 WORKDIR /opt/openMVS_build
 RUN sed -i 's/COMPONENTS iostreams program_options system serialization/COMPONENTS iostreams program_options serialization/' \
         /opt/openMVS/CMakeLists.txt \
+    && sed -i '/IMWRITE_JPEGXL_QUALITY/d' /opt/openMVS/libs/Common/Types.inl \
     && cmake /opt/openMVS \
         -DCMAKE_BUILD_TYPE=Release \
         -DVCG_ROOT=/opt/vcglib \

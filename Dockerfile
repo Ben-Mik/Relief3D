@@ -8,7 +8,7 @@
 # or:  docker compose up -d --build
 #
 # x86 only — OpenMVS TextureMesh needs AVX (won't run on Apple Silicon).
-# Engine pins: OpenMVG v2.1, OpenMVS v2.3.0, VCGLib 658ba36 (reproducible).
+# Engine pins: OpenMVG v2.1, OpenMVS v2.4.0, VCGLib 658ba36 (reproducible).
 
 # =========================================================================
 #  Stage 1: Tailwind/DaisyUI CSS bundle
@@ -49,7 +49,7 @@ RUN git clone https://github.com/cdcseacave/VCG.git vcglib \
     && git -C vcglib checkout "${VCG_COMMIT}"
 
 # OpenMVS (dense / mesh / texture) — built against system Eigen 3.4
-RUN git clone --recursive --branch v2.3.0 --depth 1 --shallow-submodules \
+RUN git clone --recursive --branch v2.4.0 --depth 1 --shallow-submodules \
         https://github.com/cdcseacave/openMVS.git
 WORKDIR /opt/openMVS_build
 RUN cmake /opt/openMVS \

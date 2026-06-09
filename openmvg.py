@@ -117,13 +117,14 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
     # Keeping the mesh small here also keeps TextureMesh fast.
     edge = f" --edge-length {o['edge_length']}" if float(o.get("edge_length") or 0) > 0 else ""
     decimate = f" --decimate {o['decimate']}" if 0 < float(o.get("decimate") or 0) < 1 else ""
+    roi = f" --roi-border {o['roi_border']}" if float(o.get("roi_border") or 0) > 0 else ""
     mvs = (
         f"set -e;"
         f"mkdir -p mvs;"
         f"openMVG_main_openMVG2openMVS -i {R}/sfm_data.json -o mvs/scene.mvs -d mvs/undist;"
         f"cd mvs;"
-        f"DensifyPointCloud scene.mvs --resolution-level {o['resolution_level']} --max-resolution {o['max_resolution']};"
-        f"ReconstructMesh scene_dense.mvs{edge}{decimate};"
+        f"DensifyPointCloud scene.mvs --resolution-level {o['resolution_level']} --max-resolution {o['max_resolution']}{roi};"
+        f"ReconstructMesh scene_dense.mvs{edge}{decimate}{roi};"
         # Export PLY (the default): OpenMVS v2.3.0's OBJ writer segfaults during
         # export on this build, while PLY is reliable. PLY carries UVs + a
         # sidecar texture PNG; the 3D-Annotator three.js loader takes PLY + PNG.

@@ -26,7 +26,7 @@ RUN npm init -y >/dev/null && \
 #  OpenMVS is built FIRST against pristine system Eigen 3.4; OpenMVG bundles its
 #  own Eigen and is built last to avoid the clash.
 # =========================================================================
-FROM ubuntu:22.04 AS engine-builder
+FROM ubuntu:24.04 AS engine-builder
 ARG DEBIAN_FRONTEND=noninteractive
 ARG VCG_COMMIT=658ba36d0a5666650da6e066b4794efc5a463407
 
@@ -36,6 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxxf86vm-dev libxi-dev libxrandr-dev \
         libeigen3-dev \
         libboost-all-dev \
+        libnanoflann-dev \
         libopencv-dev \
         libcgal-dev \
         libatlas-base-dev libsuitesparse-dev \
@@ -78,7 +79,7 @@ RUN cmake -DCMAKE_BUILD_TYPE=RELEASE \
 # =========================================================================
 #  Stage 3: runtime — engine runtime libs + binaries + Python app.
 # =========================================================================
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Runtime-only shared libs the OpenMVG/OpenMVS binaries link against, plus
@@ -86,17 +87,17 @@ ARG DEBIAN_FRONTEND=noninteractive
 # lib is still missing, so an under-specified package surfaces at build time.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
-        libpng16-16 libjpeg-turbo8 libtiff5 \
+        libpng16-16 libjpeg-turbo8t64 libtiff6 \
         libgomp1 \
         libgmp10 libmpfr6 \
-        libceres2 libcholmod3 libcxsparse3 libspqr2 libatlas3-base \
+        libceres3t64 libcholmod4 libcxsparse4 libspqr4 libatlas3-base \
         libglu1-mesa freeglut3 \
         libxxf86vm1 libxi6 libxrandr2 \
-        libboost-iostreams1.74.0 libboost-program-options1.74.0 \
-        libboost-serialization1.74.0 libboost-system1.74.0 \
-        libboost-filesystem1.74.0 \
-        libopencv-core4.5d libopencv-imgproc4.5d libopencv-imgcodecs4.5d \
-        libopencv-calib3d4.5d libopencv-features2d4.5d libopencv-flann4.5d \
+        libboost-iostreams1.83.0 libboost-program-options1.83.0 \
+        libboost-serialization1.83.0 libboost-system1.83.0 \
+        libboost-filesystem1.83.0 \
+        libopencv-core4.6d libopencv-imgproc4.6d libopencv-imgcodecs4.6d \
+        libopencv-calib3d4.6d libopencv-features2d4.6d libopencv-flann4.6d \
         python3 python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
@@ -119,7 +120,7 @@ RUN set -e; \
 # ---- Python app ----
 WORKDIR /app
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
 # Fail the build (not a job at runtime) if the pinned aruco API isn't present.
 RUN python3 -c "import cv2.aruco as a; a.ArucoDetector; a.getPredefinedDictionary(a.DICT_APRILTAG_36h11)"
 

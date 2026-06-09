@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libnanoflann-dev \
         libopencv-dev \
         libcgal-dev \
-        libatlas-base-dev libsuitesparse-dev \
+        libblas-dev liblapack-dev libsuitesparse-dev \
         libceres-dev \
         libglu1-mesa-dev freeglut3-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -90,7 +90,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libpng16-16 libjpeg-turbo8 libtiff6 \
         libgomp1 \
         libgmp10 libmpfr6 \
-        libceres4t64 libcholmod5 libcxsparse4 libspqr4 libatlas3-base \
+        libceres4t64 libcholmod5 libcxsparse4 libspqr4 libblas3 liblapack3 \
         libglu1-mesa \
         libxxf86vm1 libxi6 libxrandr2 \
         libboost-iostreams1.88.0 libboost-program-options1.88.0 \

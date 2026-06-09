@@ -124,7 +124,7 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
         f"cd mvs;"
         f"DensifyPointCloud scene.mvs --resolution-level {o['resolution_level']} --max-resolution {o['max_resolution']};"
         f"ReconstructMesh scene_dense.mvs{edge}{decimate};"
-        f"TextureMesh scene_dense.mvs --mesh-file scene_dense_mesh.ply --export-type obj"
+        f"TextureMesh scene_dense.mvs --mesh-file scene_dense_mesh.ply -o scene_dense_mesh_texture.mvs --export-type obj"
     )
     _run(work_dir, mvs, progress, "Dense / mesh / texture")
 

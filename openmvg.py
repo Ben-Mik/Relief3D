@@ -137,7 +137,7 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
     if tex_size > 0:
         if progress:
             progress("Resizing texture")
-        for tex in glob.glob(os.path.join(work_dir, "mvs", "scene_dense_texture*.png")):
+        for tex in glob.glob(os.path.join(work_dir, "mvs", "scene_dense_mesh_texture*.png")):
             img = Image.open(tex)
             scale = tex_size / max(img.width, img.height)
             if scale != 1:
@@ -145,6 +145,6 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
                 img.resize(new, Image.LANCZOS).save(tex)
 
     return {
-        "mesh_path": os.path.join(work_dir, "mvs", "scene_dense_texture.obj"),
+        "mesh_path": os.path.join(work_dir, "mvs", "scene_dense_mesh_texture.obj"),
         "georef": report,
     }

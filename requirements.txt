@@ -6,3 +6,4 @@ python-dotenv==1.0.1
 # Pinned: the aruco API was restructured at 4.7 (ArucoDetector class), so
 # don't float the version. (Pulls numpy, used by georef.py.)
 opencv-contrib-python-headless==4.10.0.84
+Pillow

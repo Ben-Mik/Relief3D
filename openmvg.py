@@ -10,9 +10,11 @@ failure reason).
 
 Requires x86 with AVX (OpenMVS TextureMesh); won't run on Apple Silicon.
 """
+import glob
 import os
 import subprocess
 import georef
+from PIL import Image
 
 SENSOR_DB = "/usr/local/lib/openMVG/sensor_width_camera_database.txt"
 
@@ -69,6 +71,8 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
 
     # ---- OpenMVS dense / mesh / texture ----
     edge = f" --edge-length {o['edge_length']}" if float(o.get("edge_length") or 0) > 0 else ""
+    simplify = (f"SimplifyMesh scene_dense_mesh.mvs --decimate-mesh-ratio {o['simplify_ratio']}"
+                f" -o scene_dense_mesh.mvs;" if float(o.get("simplify_ratio") or 0) > 0 else "")
     mvs = (
         f"set -e;"
         f"mkdir -p mvs;"
@@ -76,10 +80,23 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
         f"cd mvs;"
         f"DensifyPointCloud scene.mvs --resolution-level {o['resolution_level']} --max-resolution {o['max_resolution']};"
         f"ReconstructMesh scene_dense.mvs{edge};"
-        f"SimplifyMesh scene_dense_mesh.mvs --decimate-mesh-ratio 0.15 -o scene_dense_mesh.mvs;"
-        f"TextureMesh scene_dense_mesh.mvs --max-texture-size {o['texture_size']} --export-type obj"
+        f"{simplify}"
+        f"TextureMesh scene_dense_mesh.mvs --export-type obj"
     )
     _run(work_dir, mvs, progress, "Dense / mesh / texture")
+
+    # Post-process: downsample texture pages to user-requested size.
+    # TextureMesh picks its own atlas size based on input images; we resize
+    # after the fact so UV quality is never capped during processing.
+    tex_size = int(o.get("texture_out_size") or 0)
+    if tex_size > 0:
+        if progress:
+            progress("Resizing texture")
+        for tex in glob.glob(os.path.join(work_dir, "mvs", "scene_dense_mesh_texture*.png")):
+            img = Image.open(tex)
+            if img.width > tex_size or img.height > tex_size:
+                img = img.resize((tex_size, tex_size), Image.LANCZOS)
+                img.save(tex)
 
     return {
         "mesh_path": os.path.join(work_dir, "mvs", "scene_dense_mesh_texture.obj"),

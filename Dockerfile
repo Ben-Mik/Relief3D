@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libpng-dev libjpeg-dev libtiff-dev \
         libxxf86vm-dev libxi-dev libxrandr-dev \
         libeigen3-dev \
-        libboost1.83-all-dev \
+        libboost-all-dev \
         libnanoflann-dev \
         libopencv-dev \
         libcgal-dev \
@@ -53,7 +53,7 @@ RUN git clone https://github.com/cdcseacave/VCG.git vcglib \
 RUN git clone --recursive --branch v2.4.0 --depth 1 --shallow-submodules \
         https://github.com/cdcseacave/openMVS.git
 WORKDIR /opt/openMVS_build
-RUN cmake /opt/openMVS \
+RUN rm -rf /usr/lib/x86_64-linux-gnu/cmake/Boost-* && cmake /opt/openMVS \
         -DCMAKE_BUILD_TYPE=Release \
         -DVCG_ROOT=/opt/vcglib \
         -DOpenMVS_USE_CUDA=OFF \
@@ -94,8 +94,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libceres4t64 libcholmod5 libcxsparse4 libspqr4 libblas3 liblapack3 \
         libglu1-mesa \
         libxxf86vm1 libxi6 libxrandr2 \
-        libboost-iostreams1.83.0 libboost-program-options1.83.0 \
-        libboost-serialization1.83.0 libboost-system1.83.0 libboost-filesystem1.83.0 \
+        libboost-iostreams1.90.0 libboost-program-options1.90.0 \
+        libboost-serialization1.90.0 libboost-filesystem1.90.0 \
         libopencv-core410 libopencv-imgproc410 libopencv-imgcodecs410 \
         libopencv-calib3d410 libopencv-features2d410 libopencv-flann410 \
         python3 python3-pip \

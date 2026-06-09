@@ -26,7 +26,7 @@ RUN npm init -y >/dev/null && \
 #  OpenMVS is built FIRST against pristine system Eigen 3.4; OpenMVG bundles its
 #  own Eigen and is built last to avoid the clash.
 # =========================================================================
-FROM ubuntu:24.04 AS engine-builder
+FROM ubuntu:26.04 AS engine-builder
 ARG DEBIAN_FRONTEND=noninteractive
 ARG VCG_COMMIT=658ba36d0a5666650da6e066b4794efc5a463407
 
@@ -79,7 +79,7 @@ RUN cmake -DCMAKE_BUILD_TYPE=RELEASE \
 # =========================================================================
 #  Stage 3: runtime — engine runtime libs + binaries + Python app.
 # =========================================================================
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Runtime-only shared libs the OpenMVG/OpenMVS binaries link against, plus
@@ -87,17 +87,17 @@ ARG DEBIAN_FRONTEND=noninteractive
 # lib is still missing, so an under-specified package surfaces at build time.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
-        libpng16-16 libjpeg-turbo8t64 libtiff6 \
+        libpng16-16 libjpeg-turbo8 libtiff6 \
         libgomp1 \
         libgmp10 libmpfr6 \
-        libceres3t64 libcholmod4 libcxsparse4 libspqr4 libatlas3-base \
-        libglu1-mesa freeglut3 \
+        libceres4t64 libcholmod5 libcxsparse4 libspqr4 libatlas3-base \
+        libglu1-mesa \
         libxxf86vm1 libxi6 libxrandr2 \
-        libboost-iostreams1.83.0 libboost-program-options1.83.0 \
-        libboost-serialization1.83.0 libboost-system1.83.0 \
-        libboost-filesystem1.83.0 \
-        libopencv-core4.6d libopencv-imgproc4.6d libopencv-imgcodecs4.6d \
-        libopencv-calib3d4.6d libopencv-features2d4.6d libopencv-flann4.6d \
+        libboost-iostreams1.88.0 libboost-program-options1.88.0 \
+        libboost-serialization1.88.0 libboost-system1.88.0 \
+        libboost-filesystem1.88.0 \
+        libopencv-core410 libopencv-imgproc410 libopencv-imgcodecs410 \
+        libopencv-calib3d410 libopencv-features2d410 libopencv-flann410 \
         python3 python3-pip \
     && rm -rf /var/lib/apt/lists/*
 

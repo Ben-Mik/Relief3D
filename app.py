@@ -192,7 +192,7 @@ def new_job(project_id):
             "resolution_level": int(request.form.get("resolution_level", 1)),
             "max_resolution": int(request.form.get("max_resolution", 2560)),
             "edge_length": float(request.form.get("edge_length") or 0),
-            "texture_size": int(request.form.get("texture_size", 8192)),
+            "texture_size": int(request.form.get("texture_size", 4096)),
             "ransac_threshold": float(request.form.get("ransac_threshold") or 0.05),
         }
 
@@ -604,11 +604,12 @@ def process_relief_job(job_id, upload_dir, output_dir, options, gcp_coords,
                    georeferenced=bool(report.get("georeferenced")),
                    georef=report, outputs=produced,
                    model_id=model_id, upload_error=upload_error)
+        shutil.rmtree(work_dir, ignore_errors=True)  # success: keep output_dir, drop intermediates
     except Exception as e:
         traceback.print_exc()
         update_job(job_id, status="failed", step="Failed", error=str(e))
-    finally:
-        shutil.rmtree(work_dir, ignore_errors=True)  # keep output_dir, drop intermediates
+        # work_dir is intentionally kept on failure for inspection; the output
+        # sweep reclaims it later like any other stale output.
 
 
 JOB_QUEUE = queue.Queue()

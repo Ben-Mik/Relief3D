@@ -18,13 +18,15 @@ SENSOR_DB = "/usr/local/lib/openMVG/sensor_width_camera_database.txt"
 
 
 def _run(work_dir, shell, progress=None, stage=""):
-    """Run a chained shell pipeline (set -e) with work_dir as the working directory."""
+    """Run a chained shell pipeline (set -e) with work_dir as the working directory.
+       stderr is merged into stdout so OpenMVS errors (which it logs to stdout) are
+       captured in chronological order for a meaningful failure message."""
     if progress and stage:
         progress(stage)
     r = subprocess.run(["bash", "-c", shell], cwd=work_dir,
-                       capture_output=True, text=True)
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if r.returncode != 0:
-        raise RuntimeError(f"stage '{stage}' failed:\n{r.stderr[-2000:]}")
+        raise RuntimeError(f"stage '{stage}' failed:\n{r.stdout[-3000:]}")
     return r.stdout
 
 
@@ -74,6 +76,7 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
         f"cd mvs;"
         f"DensifyPointCloud scene.mvs --resolution-level {o['resolution_level']} --max-resolution {o['max_resolution']};"
         f"ReconstructMesh scene_dense.mvs{edge};"
+        f"SimplifyMesh scene_dense_mesh.mvs --decimate-mesh-ratio 0.15 -o scene_dense_mesh.mvs;"
         f"TextureMesh scene_dense_mesh.mvs --max-texture-size {o['texture_size']} --export-type obj"
     )
     _run(work_dir, mvs, progress, "Dense / mesh / texture")

@@ -70,6 +70,10 @@
                 <input type="number" step="any" name="edge_length" value="0" class="input input-bordered input-sm w-full">
             </div>
             <div>
+                <label class="label py-1"><span class="label-text text-sm">Mesh <code class="opacity-60">--decimate</code> 0–1 (0=off)</span></label>
+                <input type="number" step="any" min="0" max="1" name="decimate" value="0" class="input input-bordered input-sm w-full">
+            </div>
+            <div>
                 <label class="label py-1"><span class="label-text text-sm">Texture output size</span></label>
                 <select name="texture_out_size" class="select select-bordered select-sm w-full">
                     <option value="4096" selected>4096</option>

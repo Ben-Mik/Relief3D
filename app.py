@@ -192,6 +192,7 @@ def new_job(project_id):
             "resolution_level": int(request.form.get("resolution_level", 1)),
             "max_resolution": int(request.form.get("max_resolution", 2560)),
             "edge_length": float(request.form.get("edge_length") or 0),
+            "decimate": float(request.form.get("decimate") or 0),
             "texture_out_size": int(request.form.get("texture_out_size") or 0),
             "ransac_threshold": float(request.form.get("ransac_threshold") or 0.05),
         }
@@ -489,6 +490,7 @@ def _write_report(output_dir, job_id, options, report):
         f"Densify resolution-level: {o['resolution_level']}",
         f"Densify max-resolution:   {o['max_resolution']} px",
         f"Mesh edge-length:         {edge} m" + ("" if edge else " (off)"),
+        f"Mesh decimate ratio:      {o['decimate'] or 'off'}",
         f"Texture output size:      {o['texture_out_size'] or 'unchanged'}",
         f"Georef RANSAC threshold:  {o['ransac_threshold']} m",
         "",

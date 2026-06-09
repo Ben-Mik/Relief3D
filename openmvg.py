@@ -37,7 +37,7 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
     """Full pipeline. Photos must already be at  work_dir/images.
        Returns {"mesh_path": <obj>, "georef": <report dict>}.
        options: feature_preset, sfm_engine, resolution_level, max_resolution,
-                edge_length, texture_size, ransac_threshold."""
+                edge_length, decimate, texture_out_size, ransac_threshold."""
     o = options
     M, R = "ovg/matches", "ovg/recon"
 
@@ -70,16 +70,19 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
                                      report["rotation"], report["translation"])
 
     # ---- OpenMVS dense / mesh / texture ----
+    # Detail levers on ReconstructMesh (both built into OpenMVS v2.3.0, quadric
+    # edge-collapse simplification). edge-length is metric when georeferenced
+    # (real-world triangle size); decimate is a scale-independent ratio (0..1].
+    # Keeping the mesh small here also keeps TextureMesh fast.
     edge = f" --edge-length {o['edge_length']}" if float(o.get("edge_length") or 0) > 0 else ""
-    simplify = ""
+    decimate = f" --decimate {o['decimate']}" if 0 < float(o.get("decimate") or 0) < 1 else ""
     mvs = (
         f"set -e;"
         f"mkdir -p mvs;"
         f"openMVG_main_openMVG2openMVS -i {R}/sfm_data.json -o mvs/scene.mvs -d mvs/undist;"
         f"cd mvs;"
         f"DensifyPointCloud scene.mvs --resolution-level {o['resolution_level']} --max-resolution {o['max_resolution']};"
-        f"ReconstructMesh scene_dense.mvs{edge};"
-        f"{simplify}"
+        f"ReconstructMesh scene_dense.mvs{edge}{decimate};"
         f"TextureMesh scene_dense.mvs --mesh-file scene_dense_mesh.ply --export-type obj"
     )
     _run(work_dir, mvs, progress, "Dense / mesh / texture")

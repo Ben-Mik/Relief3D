@@ -53,7 +53,9 @@ RUN git clone https://github.com/cdcseacave/VCG.git vcglib \
 RUN git clone --recursive --branch v2.4.0 --depth 1 --shallow-submodules \
         https://github.com/cdcseacave/openMVS.git
 WORKDIR /opt/openMVS_build
-RUN rm -rf /usr/lib/x86_64-linux-gnu/cmake/Boost-* && cmake /opt/openMVS \
+RUN echo 'if(NOT TARGET Boost::system)\n  add_library(Boost::system INTERFACE IMPORTED)\nendif()' \
+        > /usr/lib/x86_64-linux-gnu/cmake/Boost-1.90.0/boost_system-config.cmake \
+    && cmake /opt/openMVS \
         -DCMAKE_BUILD_TYPE=Release \
         -DVCG_ROOT=/opt/vcglib \
         -DOpenMVS_USE_CUDA=OFF \

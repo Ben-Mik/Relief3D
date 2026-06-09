@@ -71,8 +71,7 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
 
     # ---- OpenMVS dense / mesh / texture ----
     edge = f" --edge-length {o['edge_length']}" if float(o.get("edge_length") or 0) > 0 else ""
-    simplify = (f"SimplifyMesh scene_dense_mesh.mvs --decimate-mesh-ratio {o['simplify_ratio']}"
-                f" -o scene_dense_mesh.mvs;" if float(o.get("simplify_ratio") or 0) > 0 else "")
+    simplify = ""
     mvs = (
         f"set -e;"
         f"mkdir -p mvs;"

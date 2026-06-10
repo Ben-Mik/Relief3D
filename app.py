@@ -728,7 +728,8 @@ def process_relief_job(job_id, upload_dir, output_dir, options, gcp_coords,
             _try_upload(job_id, token)
         else:
             drop_token(job_id)  # local-only run: nothing to auto-upload
-        shutil.rmtree(work_dir, ignore_errors=True)  # keep output_dir, drop intermediates
+        if not os.environ.get("RELIEF3D_KEEP_WORK"):  # debug: keep mvs/undist + scene_dense
+            shutil.rmtree(work_dir, ignore_errors=True)  # keep output_dir, drop intermediates
     except Exception as e:
         traceback.print_exc()
         update_job(job_id, status="failed", step="Failed", error=str(e))

@@ -138,6 +138,10 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
     # Keeping the mesh small here also keeps TextureMesh fast.
     edge = f" --edge-length {o['edge_length']}" if float(o.get("edge_length") or 0) > 0 else ""
     decimate = f" --decimate {o['decimate']}" if 0 < float(o.get("decimate") or 0) < 1 else ""
+    # Debug toggle: RELIEF3D_TEX_THREADS=1 forces single-threaded texturing — tests
+    # whether the silent texture corruption is an OpenMP/threading race in this build.
+    tex_mt = (f" --max-threads {os.environ['RELIEF3D_TEX_THREADS']}"
+              if os.environ.get("RELIEF3D_TEX_THREADS") else "")
     # OpenMVS 2.4 estimates a region-of-interest from a robust *core* of points and
     # crops the mesh to it — and it's ON by default (--estimate-roi 1.1,
     # --crop-to-roi true), so a normal run silently trims the result, and on sparse
@@ -163,7 +167,7 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
         # Export PLY (the default): OpenMVS v2.3.0's OBJ writer segfaults during
         # export on this build, while PLY is reliable. PLY carries UVs + a
         # sidecar texture PNG; the 3D-Annotator three.js loader takes PLY + PNG.
-        f"TextureMesh scene_dense.mvs --mesh-file scene_dense_mesh.ply -o scene_dense_mesh_texture.mvs"
+        f"TextureMesh scene_dense.mvs --mesh-file scene_dense_mesh.ply{tex_mt} -o scene_dense_mesh_texture.mvs"
     )
     _run(work_dir, mvs, progress, "Dense / mesh / texture", log_path)
 

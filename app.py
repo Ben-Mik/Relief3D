@@ -57,6 +57,9 @@ PHOTO_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
 # Retention window (hours) for both auto-sweeps: abandoned pending uploads and
 # leftover meshes from failed/local-only runs. Tune per excavation via env.
 SWEEP_HOURS = float(os.environ.get("RELIEF3D_SWEEP_HOURS", 8))
+# How often the pending-upload reconciler wakes to flush done-but-unuploaded jobs
+# to the annotator (seconds). A failed upload self-heals within SWEEP_HOURS.
+RECONCILE_SECS = float(os.environ.get("RELIEF3D_RECONCILE_SECS", 60))
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -100,6 +103,50 @@ def update_job(job_id, **updates):
     if job_id in jobs:
         jobs[job_id].update(updates)
         save_jobs(jobs)
+
+
+# ─── Annotator-token side store ──────────────────────────────────────────────
+# The annotator token is needed to (re)upload a finished mesh — including by the
+# background reconciler, long after the user's browser session is gone. It is a
+# credential, so it is kept OUT of the job record (which /api/jobs serves verbatim
+# and templates render) and in this separate file the API never exposes. It lives
+# only while a job still needs uploading, and is dropped the moment the upload
+# succeeds, hits a permanent error, or the mesh is swept.
+TOKENS_FILE = os.path.join(DATA_DIR, "jobs", "tokens.json")
+TOKENS_LOCK = threading.Lock()
+
+
+def _read_tokens():
+    if not os.path.exists(TOKENS_FILE):
+        return {}
+    with open(TOKENS_FILE) as f:
+        return json.load(f)
+
+
+def get_token(job_id):
+    with TOKENS_LOCK:
+        return _read_tokens().get(job_id)
+
+
+def set_token(job_id, token):
+    with TOKENS_LOCK:
+        t = _read_tokens()
+        t[job_id] = token
+        with open(TOKENS_FILE, "w") as f:
+            json.dump(t, f)
+
+
+def drop_token(job_id):
+    with TOKENS_LOCK:
+        t = _read_tokens()
+        if t.pop(job_id, None) is not None:
+            with open(TOKENS_FILE, "w") as f:
+                json.dump(t, f)
+
+
+def _token_job_ids():
+    with TOKENS_LOCK:
+        return list(_read_tokens().keys())
 
 
 def _drop_meshes(d):
@@ -282,19 +329,16 @@ def job_status(job_id):
 
 @app.route("/jobs/<job_id>/reupload", methods=["POST"])
 def reupload(job_id):
-    """Re-push a finished job's kept mesh to the annotator (failed/local-only runs).
-       Uses the current session token; clears the mesh on success like a fresh job."""
+    """Manually re-push a finished job's kept mesh, using the current session token.
+       Clears any prior permanent-error flag (the user may have a fresh token) and
+       reuses the same idempotent upload path as the auto-reconciler."""
     job = load_jobs().get(job_id)
     token = session.get("token")
     if not job or not token or not _can_reupload(job):
         abort(400)
-    try:
-        model_id = upload_to_annotator(job["project_id"], job["model_name"],
-                                       job["output_dir"], token)
-        _drop_meshes(job["output_dir"])
-        update_job(job_id, model_id=model_id, upload_error=None, step="Done")
-    except Exception as e:
-        update_job(job_id, upload_error=str(e))
+    update_job(job_id, upload_permanent_error=None)
+    set_token(job_id, token)
+    _try_upload(job_id, token)
     return redirect(url_for("job_status", job_id=job_id))
 
 
@@ -531,26 +575,94 @@ def _zip_textured_mesh(mesh_dir):
     return buf
 
 
-def upload_to_annotator(project_id, model_name, mesh_dir, token):
-    """Create a modelData entry, then PUT the textured-mesh zip. Returns model id."""
+class UploadError(RuntimeError):
+    """Upload failure carrying the HTTP status (None for a connection-level error)
+       so callers can tell transient (retry) from permanent (surface)."""
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
+
+
+def upload_to_annotator(project_id, model_name, mesh_dir, token,
+                        model_id=None, on_create=None):
+    """Create a modelData entry (unless model_id is given), then PUT the textured-
+       mesh zip. Returns the model id. Idempotent across retries: pass a previously
+       created model_id to skip re-creating the entry — this avoids orphaning empty
+       modelData rows when a PUT fails — and re-PUT straight to it. on_create(id) is
+       invoked the instant a fresh entry is created, so the caller can persist it
+       before the (failable) PUT."""
     auth = {"Authorization": f"Token {token}"}
-    r = requests.post(
-        f"{ANNOTATOR_BASE_URL}/api/v1/modelData/",
-        json={"project_id": project_id, "name": model_name,
-              "modelType": "texture_mesh", "annotationType": "index"},
-        headers=auth)
-    if not r.ok:
-        raise RuntimeError(f"modelData create failed [{r.status_code}]: {r.text}")
-    model_id = r.json().get("modelData_id")
-    if not model_id:
-        raise RuntimeError(f"modelData create returned no id: {r.text}")
-    up = requests.put(
-        f"{ANNOTATOR_BASE_URL}/api/v1/modelData/{model_id}/baseFile",
-        files={"file": ("baseFile.zip", _zip_textured_mesh(mesh_dir), "application/zip")},
-        data={"fileFormat": "application/zip"}, headers=auth)
-    if not up.ok:
-        raise RuntimeError(f"baseFile upload failed [{up.status_code}]: {up.text}")
-    return model_id
+    try:
+        if model_id is None:
+            r = requests.post(
+                f"{ANNOTATOR_BASE_URL}/api/v1/modelData/",
+                json={"project_id": project_id, "name": model_name,
+                      "modelType": "texture_mesh", "annotationType": "index"},
+                headers=auth)
+            if not r.ok:
+                raise UploadError(
+                    f"modelData create failed [{r.status_code}]: {r.text}", r.status_code)
+            model_id = r.json().get("modelData_id")
+            if not model_id:
+                raise UploadError(
+                    f"modelData create returned no id: {r.text}", r.status_code)
+            if on_create:
+                on_create(model_id)
+        up = requests.put(
+            f"{ANNOTATOR_BASE_URL}/api/v1/modelData/{model_id}/baseFile",
+            files={"file": ("baseFile.zip", _zip_textured_mesh(mesh_dir), "application/zip")},
+            data={"fileFormat": "application/zip"}, headers=auth)
+        if not up.ok:
+            raise UploadError(
+                f"baseFile upload failed [{up.status_code}]: {up.text}", up.status_code)
+        return model_id
+    except requests.RequestException as e:
+        raise UploadError(f"connection error: {e}", None)
+
+
+UPLOAD_LOCK = threading.Lock()
+
+
+def _upload_pending(job):
+    """Reconstruction finished, mesh still on disk, not yet uploaded, and no
+       permanent error — i.e. an upload that should (still) be attempted."""
+    return bool(job) and not job.get("upload_permanent_error") and _can_reupload(job)
+
+
+def _try_upload(job_id, token):
+    """Attempt the annotator upload for one finished job and update its state.
+       Returns True on success. Serialized via UPLOAD_LOCK so the worker's first
+       attempt and the reconciler never upload the same job at once. Failure
+       classification: 4xx (e.g. 401 expired token) is permanent -> flag it, drop
+       the token, stop auto-retrying; connection / 5xx is transient -> leave it for
+       the reconciler's next pass."""
+    if not UPLOAD_LOCK.acquire(blocking=False):
+        return False  # another upload in flight; the reconciler will revisit
+    try:
+        job = load_jobs().get(job_id)
+        if not job:
+            return False
+        try:
+            model_id = upload_to_annotator(
+                job["project_id"], job["model_name"], job["output_dir"], token,
+                model_id=job.get("pending_model_id"),
+                on_create=lambda mid: update_job(job_id, pending_model_id=mid))
+            _drop_meshes(job["output_dir"])
+            update_job(job_id, model_id=model_id, step="Done",
+                       upload_error=None, upload_permanent_error=None)
+            drop_token(job_id)
+            return True
+        except UploadError as e:
+            if e.status and 400 <= e.status < 500:
+                update_job(job_id, upload_error=str(e), upload_permanent_error=True,
+                           step="Upload failed — needs attention")
+                drop_token(job_id)
+            else:
+                update_job(job_id, upload_error=str(e),
+                           step="Upload failed — will retry")
+            return False
+    finally:
+        UPLOAD_LOCK.release()
 
 
 # ---------------------------------------------------------------------------
@@ -591,28 +703,24 @@ def process_relief_job(job_id, upload_dir, output_dir, options, gcp_coords,
         report["crs"] = load_jobs().get(job_id, {}).get("crs")
         _write_report(output_dir, job_id, options, report)
 
-        # Upload to the annotator. Reconstruction is already done, so an upload
-        # failure does NOT fail the job — it stays "done" with no model_id and an
-        # upload_error; the mesh is kept and the UI offers a re-upload. (No token =
-        # local-only run, also re-uploadable later from a tokened session.)
-        model_id, upload_error = None, None
-        if token:
-            update_job(job_id, status="processing", step="Uploading to annotator")
-            try:
-                model_id = upload_to_annotator(project_id, model_name, output_dir, token)
-                _drop_meshes(output_dir)  # safe in annotator now; keep report.txt
-            except Exception as e:
-                upload_error = str(e)
-
-        update_job(job_id, status="done",
-                   step="Done" if (model_id or not token) else "Upload failed",
+        # Record reconstruction success independently of the upload: the job is
+        # "done" with the mesh on disk regardless of whether the annotator is
+        # reachable. The upload is attempted once here; if it fails (transiently),
+        # the reconciler auto-flushes it when the annotator comes back.
+        update_job(job_id, status="done", step="Done",
                    georeferenced=bool(report.get("georeferenced")),
-                   georef=report, outputs=produced,
-                   model_id=model_id, upload_error=upload_error)
-        shutil.rmtree(work_dir, ignore_errors=True)  # success: keep output_dir, drop intermediates
+                   georef=report, outputs=produced, model_id=None)
+        if token:
+            set_token(job_id, token)  # held only until the upload sticks
+            update_job(job_id, step="Uploading to annotator")
+            _try_upload(job_id, token)
+        else:
+            drop_token(job_id)  # local-only run: nothing to auto-upload
+        shutil.rmtree(work_dir, ignore_errors=True)  # keep output_dir, drop intermediates
     except Exception as e:
         traceback.print_exc()
         update_job(job_id, status="failed", step="Failed", error=str(e))
+        drop_token(job_id)  # reconstruction failed: no mesh to upload
         # work_dir is intentionally kept on failure for inspection; the output
         # sweep reclaims it later like any other stale output.
 
@@ -630,6 +738,51 @@ def _job_worker():
 
 
 threading.Thread(target=_job_worker, daemon=True).start()
+
+
+# Pending-upload reconciler: a finished job whose annotator upload failed keeps its
+# mesh + token and is retried here whenever the annotator is reachable, so a field
+# connectivity drop self-heals without manual re-upload. Bounded by SWEEP_HOURS
+# (mesh + token are reclaimed with the job's outputs after that).
+def _annotator_reachable():
+    try:
+        return requests.get(ANNOTATOR_BASE_URL, timeout=3).status_code < 500
+    except requests.RequestException:
+        return False
+
+
+def _flush_pending_uploads():
+    jobs = load_jobs()
+    pending = [jid for jid, j in jobs.items()
+               if _upload_pending(j) and get_token(jid)]
+    if pending and _annotator_reachable():
+        for jid in pending:
+            token = get_token(jid)
+            if not token:
+                continue
+            if _try_upload(jid, token):
+                continue
+            # transient failure (permanent ones flag themselves and are skipped
+            # next pass): the annotator likely dropped — stop hammering this cycle.
+            if not load_jobs().get(jid, {}).get("upload_permanent_error"):
+                break
+    # Reclaim tokens for jobs that no longer need one (uploaded, permanent error,
+    # or mesh swept) so the side store never accumulates stale credentials.
+    for jid in _token_job_ids():
+        if not _upload_pending(jobs.get(jid)):
+            drop_token(jid)
+
+
+def _reconciler():
+    while True:
+        time.sleep(RECONCILE_SECS)
+        try:
+            _flush_pending_uploads()
+        except Exception:
+            traceback.print_exc()
+
+
+threading.Thread(target=_reconciler, daemon=True).start()
 
 
 if __name__ == "__main__":

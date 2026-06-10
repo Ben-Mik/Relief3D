@@ -82,6 +82,7 @@ RUN cmake -DCMAKE_BUILD_TYPE=RELEASE \
         -DOpenMVG_BUILD_TESTS=OFF \
         -DOpenMVG_BUILD_EXAMPLES=OFF \
         -DOpenMVG_BUILD_DOC=OFF \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
         /opt/openMVG/src \
     && make -j"$(nproc)" \
     && make install \

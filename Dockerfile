@@ -68,10 +68,15 @@ RUN sed -i 's/COMPONENTS iostreams program_options system serialization/COMPONEN
     && make install \
     && ldconfig
 
-# OpenMVG (SfM) — bundled deps via submodules, built last
+# OpenMVG (SfM) — built last. Clone non-recursively and init only the submodules
+# we actually compile: cereal (serialization, required) and osi_clp (linear
+# solver used by the GLOBAL SfM engine). The glfw submodule is skipped — it's
+# only for openMVG's GUI/examples, which we don't build (BUILD_EXAMPLES=OFF), so
+# fetching it is both dead weight and a needless network failure point.
 WORKDIR /opt
-RUN git clone --recursive --branch v2.1 --depth 1 --shallow-submodules \
-        https://github.com/openMVG/openMVG.git
+RUN git clone --branch v2.1 --depth 1 https://github.com/openMVG/openMVG.git \
+    && git -C openMVG submodule update --init --depth 1 \
+        src/dependencies/cereal src/dependencies/osi_clp
 WORKDIR /opt/openMVG_build
 RUN cmake -DCMAKE_BUILD_TYPE=RELEASE \
         -DOpenMVG_BUILD_TESTS=OFF \

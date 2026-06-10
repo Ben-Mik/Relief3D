@@ -26,9 +26,9 @@
         {% endif %}
     </div>
     {% endif %}
-    {% if job.can_reupload or job.can_retry %}
+    {% if job.needs_manual or job.can_retry %}
     <div class="flex items-center gap-2 text-sm">
-        {% if job.can_reupload %}
+        {% if job.needs_manual %}
         <span class="badge badge-warning cursor-pointer reupload"
               data-url="{{ url_for('reupload', job_id=job_id) }}">↻ Reupload</span>
         {% endif %}

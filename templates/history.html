@@ -19,7 +19,7 @@
                 {% if job.gcp_count and job.georef %}
                 <span class="badge badge-sm {{ 'badge-success' if job.georeferenced else 'badge-error' }}">Geo</span>
                 {% endif %}
-                {% if job.can_reupload %}
+                {% if job.needs_manual %}
                 <span class="badge badge-sm badge-warning cursor-pointer reupload"
                       data-url="{{ url_for('reupload', job_id=job_id) }}">↻ Reupload</span>
                 {% endif %}

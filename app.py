@@ -324,6 +324,7 @@ def job_status(job_id):
         return redirect(url_for("history"))
     job["can_reupload"] = _can_reupload(job)
     job["can_retry"] = _can_retry(job)
+    job["needs_manual"] = _needs_manual_upload(job_id, job)
     return render_template("job.html", job=job, job_id=job_id)
 
 
@@ -353,6 +354,7 @@ def history():
     for _id, job in sorted_jobs:
         job["can_reupload"] = _can_reupload(job)
         job["can_retry"] = _can_retry(job)
+        job["needs_manual"] = _needs_manual_upload(_id, job)
     return render_template("history.html", jobs=sorted_jobs)
 
 
@@ -627,6 +629,15 @@ def _upload_pending(job):
     """Reconstruction finished, mesh still on disk, not yet uploaded, and no
        permanent error — i.e. an upload that should (still) be attempted."""
     return bool(job) and not job.get("upload_permanent_error") and _can_reupload(job)
+
+
+def _needs_manual_upload(job_id, job):
+    """Manual re-upload is the only path forward — the auto-reconciler can't help:
+       either a permanent error (needs a fresh token) or a local-only run (no token
+       was ever stored). Transient failures are left to the reconciler, so the button
+       stays hidden while it auto-retries (a manual attempt would hit the same wall)."""
+    return _can_reupload(job) and (
+        bool(job.get("upload_permanent_error")) or not get_token(job_id))
 
 
 def _try_upload(job_id, token):

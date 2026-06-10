@@ -695,7 +695,8 @@ def process_relief_job(job_id, upload_dir, output_dir, options, gcp_coords,
 
         result = openmvg.reconstruct(work_dir, options, gcp_coords or None,
                                      observations=observations,
-                                     preset_offset=preset_offset, progress=progress)
+                                     preset_offset=preset_offset, progress=progress,
+                                     log_path=os.path.join(output_dir, "processing_log.txt"))
         report = result["georef"]
 
         # Collect the textured mesh (ply + texture image) into output_dir.

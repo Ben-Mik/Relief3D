@@ -19,14 +19,21 @@ from PIL import Image
 SENSOR_DB = "/usr/local/lib/openMVG/sensor_width_camera_database.txt"
 
 
-def _run(work_dir, shell, progress=None, stage=""):
+def _run(work_dir, shell, progress=None, stage="", log_path=None):
     """Run a chained shell pipeline (set -e) with work_dir as the working directory.
        stderr is merged into stdout so OpenMVS errors (which it logs to stdout) are
-       captured in chronological order for a meaningful failure message."""
+       captured in chronological order for a meaningful failure message. When
+       log_path is given, the exact command + full engine output for this stage are
+       appended there — kept even on failure — so post-mortem diagnosis has the
+       engine's own words (coverage, faces-not-covered, masked views, seam-leveling)
+       instead of guessing from the rendered result."""
     if progress and stage:
         progress(stage)
     r = subprocess.run(["bash", "-c", shell], cwd=work_dir,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if log_path:
+        with open(log_path, "a") as f:
+            f.write(f"\n{'='*72}\n# stage: {stage}\n{'='*72}\n$ {shell}\n\n{r.stdout}\n")
     if r.returncode != 0:
         raise RuntimeError(f"stage '{stage}' failed:\n{r.stdout[-3000:]}")
     return r.stdout
@@ -65,14 +72,21 @@ def _downscale_images(work_dir, pct, observations):
 
 
 def reconstruct(work_dir, options, gcp_coords=None, observations=None,
-                preset_offset=None, progress=None):
+                preset_offset=None, progress=None, log_path=None):
     """Full pipeline. Photos must already be at  work_dir/images.
        Returns {"mesh_path": <obj>, "georef": <report dict>}.
        options: feature_preset, sfm_engine, max_image_pct, resolution_level,
                 max_resolution, edge_length, decimate, texture_out_size,
-                ransac_threshold."""
+                ransac_threshold.
+       log_path: if given, the full per-stage engine output is written there
+                 (kept on the hub for post-mortem; not shipped to the annotator)."""
     o = options
     M, R = "ovg/matches", "ovg/recon"
+
+    if log_path:
+        with open(log_path, "w") as f:
+            f.write("Relief3D engine log\n===================\n")
+            f.write(f"options: {options}\n")
 
     # Downscale the working images first (markers were detected full-res at
     # upload). This is the main SfM speed lever and sets the texture-source
@@ -94,7 +108,7 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
         f"openMVG_main_SfM --sfm_engine {o['sfm_engine']} --input_file {M}/sfm_data.json --match_dir {M} --output_dir {R};"
         f"openMVG_main_ConvertSfM_DataFormat -i {R}/sfm_data.bin -o {R}/sfm_data.json -V -I -E -S"
     )
-    _run(work_dir, sfm, progress, "SfM")
+    _run(work_dir, sfm, progress, "SfM", log_path)
     sfm_json = os.path.join(work_dir, "ovg", "recon", "sfm_data.json")
 
     # ---- georef (best-effort): compute on the poses, apply to sfm_data before dense ----
@@ -109,6 +123,9 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
         if report.get("georeferenced"):
             georef.apply_to_sfm_data(sfm_json, report["scale"],
                                      report["rotation"], report["translation"])
+    if log_path:
+        with open(log_path, "a") as f:
+            f.write(f"\n# georef: {report}\n")
 
     # ---- OpenMVS dense / mesh / texture ----
     # Detail levers on ReconstructMesh (both built into OpenMVS v2.3.0, quadric
@@ -144,7 +161,7 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
         # sidecar texture PNG; the 3D-Annotator three.js loader takes PLY + PNG.
         f"TextureMesh scene_dense.mvs --mesh-file scene_dense_mesh.ply -o scene_dense_mesh_texture.mvs"
     )
-    _run(work_dir, mvs, progress, "Dense / mesh / texture")
+    _run(work_dir, mvs, progress, "Dense / mesh / texture", log_path)
 
     # Post-process: resize texture pages to the user-requested size. OpenMVS
     # auto-sizes the atlas during texturing (so UV quality is never capped at
@@ -161,6 +178,10 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
             if scale != 1:
                 new = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
                 img.resize(new, Image.LANCZOS).save(tex)
+                if log_path:
+                    with open(log_path, "a") as f:
+                        f.write(f"\n# resized {os.path.basename(tex)} "
+                                f"{img.width}x{img.height} -> {new[0]}x{new[1]}\n")
 
     return {
         "mesh_path": os.path.join(work_dir, "mvs", "scene_dense_mesh_texture.ply"),

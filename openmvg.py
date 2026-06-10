@@ -117,14 +117,28 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
     # Keeping the mesh small here also keeps TextureMesh fast.
     edge = f" --edge-length {o['edge_length']}" if float(o.get("edge_length") or 0) > 0 else ""
     decimate = f" --decimate {o['decimate']}" if 0 < float(o.get("decimate") or 0) < 1 else ""
-    roi = f" --roi-border {o['roi_border']}" if float(o.get("roi_border") or 0) > 0 else ""
+    # OpenMVS 2.4 estimates a region-of-interest from a robust *core* of points and
+    # crops the mesh to it — and it's ON by default (--estimate-roi 1.1,
+    # --crop-to-roi true), so a normal run silently trims the result, and on sparse
+    # scenes it can trim everything. We drive it explicitly from one value
+    # (`roi_border`, the UI "Auto-boundaries"):
+    #   --estimate-roi is a MULTIPLIER on the core box (EnlargePercent: m_ext *= x),
+    #   so 1.0 = tight to the subject, 1.2 = +20%, and <1 SHRINKS into the subject.
+    # Hence only >=1 enables cropping (passed straight through); anything else turns
+    # ROI fully OFF so the whole model is reconstructed.
+    roi_scale = float(o.get("roi_border") or 0)
+    if roi_scale >= 1:
+        densify_roi, recon_roi = f" --estimate-roi {roi_scale}", ""
+    else:
+        densify_roi = " --estimate-roi 0 --crop-to-roi false"
+        recon_roi = " --crop-to-roi false"
     mvs = (
         f"set -e;"
         f"mkdir -p mvs;"
         f"openMVG_main_openMVG2openMVS -i {R}/sfm_data.json -o mvs/scene.mvs -d mvs/undist;"
         f"cd mvs;"
-        f"DensifyPointCloud scene.mvs --resolution-level {o['resolution_level']} --max-resolution {o['max_resolution']}{roi};"
-        f"ReconstructMesh scene_dense.mvs{edge}{decimate}{roi};"
+        f"DensifyPointCloud scene.mvs --resolution-level {o['resolution_level']} --max-resolution {o['max_resolution']}{densify_roi};"
+        f"ReconstructMesh scene_dense.mvs{edge}{decimate}{recon_roi};"
         # Export PLY (the default): OpenMVS v2.3.0's OBJ writer segfaults during
         # export on this build, while PLY is reliable. PLY carries UVs + a
         # sidecar texture PNG; the 3D-Annotator three.js loader takes PLY + PNG.

@@ -13,6 +13,7 @@ Requires x86 with AVX (OpenMVS TextureMesh); won't run on Apple Silicon.
 import glob
 import os
 import subprocess
+import time
 import georef
 from PIL import Image
 
@@ -29,11 +30,13 @@ def _run(work_dir, shell, progress=None, stage="", log_path=None):
        instead of guessing from the rendered result."""
     if progress and stage:
         progress(stage)
+    t0 = time.monotonic()
     r = subprocess.run(["bash", "-c", shell], cwd=work_dir,
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    elapsed = time.monotonic() - t0
     if log_path:
         with open(log_path, "a") as f:
-            f.write(f"\n{'='*72}\n# stage: {stage}\n{'='*72}\n$ {shell}\n\n{r.stdout}\n")
+            f.write(f"\n{'='*72}\n# stage: {stage}  ({elapsed:.1f}s)\n{'='*72}\n$ {shell}\n\n{r.stdout}\n")
     if r.returncode != 0:
         raise RuntimeError(f"stage '{stage}' failed:\n{r.stdout[-3000:]}")
     return r.stdout
@@ -82,6 +85,7 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
                  (kept on the hub for post-mortem; not shipped to the annotator)."""
     o = options
     M, R = "ovg/matches", "ovg/recon"
+    t_start = time.monotonic()
 
     if log_path:
         with open(log_path, "w") as f:
@@ -172,6 +176,7 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
     if tex_size > 0:
         if progress:
             progress("Resizing texture")
+        t_resize = time.monotonic()
         for tex in glob.glob(os.path.join(work_dir, "mvs", "scene_dense_mesh_texture*.png")):
             img = Image.open(tex)
             scale = tex_size / max(img.width, img.height)
@@ -182,6 +187,13 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
                     with open(log_path, "a") as f:
                         f.write(f"\n# resized {os.path.basename(tex)} "
                                 f"{img.width}x{img.height} -> {new[0]}x{new[1]}\n")
+        if log_path:
+            with open(log_path, "a") as f:
+                f.write(f"# texture resize: {time.monotonic() - t_resize:.1f}s\n")
+
+    if log_path:
+        with open(log_path, "a") as f:
+            f.write(f"\n# TOTAL: {time.monotonic() - t_start:.1f}s\n")
 
     return {
         "mesh_path": os.path.join(work_dir, "mvs", "scene_dense_mesh_texture.ply"),

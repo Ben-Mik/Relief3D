@@ -8,10 +8,17 @@
 # or:  docker compose up -d --build
 #
 # x86 only — OpenMVS TextureMesh needs AVX (won't run on Apple Silicon).
-# Engine pins: OpenMVG v2.1, OpenMVS v2.4.0, OpenCV 4.12.0, VCGLib 658ba36.
+# Engine pins: OpenMVG v2.1, OpenMVS v2.4.0, CGAL v6.0.1, VCGLib 658ba36.
+#
+# Base = Ubuntu 24.04 to match upstream OpenMVS's tested toolchain (GCC 13,
+# apt OpenCV 4.6, source Eigen/CGAL). The engine build is SINGLE-STAGE — same
+# pattern as upstream's docker/Dockerfile + buildInDocker.sh: build deps stay
+# in the image and serve as the runtime libs, so there is no separate runtime
+# stage to keep package-pinned in sync (that split is what caused the U26
+# t64/410/jxl runtime-pin churn). CSS is the only separate stage (needs Node).
 
 # =========================================================================
-#  Stage 1: Tailwind/DaisyUI CSS bundle
+#  Stage 1: Tailwind/DaisyUI CSS bundle (Node — kept out of the final image)
 # =========================================================================
 FROM node:20-alpine AS css-builder
 WORKDIR /build
@@ -22,62 +29,35 @@ RUN npm init -y >/dev/null && \
     npx tailwindcss -i ./input.css -o ./output.css --minify
 
 # =========================================================================
-#  Stage 2: engine builder — compiles Eigen, OpenCV, CGAL, OpenMVG, OpenMVS.
-#
-#  Build order follows upstream's buildInDocker.sh (Eigen → OpenCV → CGAL →
-#  OpenMVS), with OpenMVG added after. OpenCV is built from source at 4.12.0
-#  rather than apt so OpenMVS gets the version it targets and we avoid
-#  packaging quirks. Ubuntu 26 patches noted inline.
+#  Stage 2: engine + app — Ubuntu 24.04 / GCC 13, single stage.
 # =========================================================================
-FROM ubuntu:26.04 AS engine-builder
+FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 ARG VCG_COMMIT=658ba36d0a5666650da6e066b4794efc5a463407
 
-# Build-time deps (same set upstream uses, plus Ceres/SuiteSparse for OpenMVG)
+# Build + runtime deps in one go (single stage = build libs ARE runtime libs).
+# OpenCV is apt 4.6 — the version upstream builds against on 24.04; texture
+# corruption was already ruled out as version-related, so 4.6 is the simplest
+# match. OpenMVG keeps its bundled osi_clp submodule (U24's cmake 3.28 accepts
+# its old cmake_minimum, so no policy patch needed). graphviz provides neato
+# for OpenMVG's match-graph step (silences the 'neato: not found' warning).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake git ca-certificates pkg-config \
         libpng-dev libjpeg-dev libtiff-dev \
         libglu1-mesa-dev libglew-dev libglfw3-dev \
         libxxf86vm-dev libxi-dev libxrandr-dev \
-        libboost-iostreams-dev libboost-program-options-dev \
-        libboost-system-dev libboost-serialization-dev \
-        libboost-filesystem-dev \
+        libeigen3-dev \
+        libboost-all-dev \
+        libnanoflann-dev \
+        libopencv-dev \
         libgmp-dev libmpfr-dev zlib1g-dev \
         libblas-dev liblapack-dev libsuitesparse-dev \
         libceres-dev \
-        libnanoflann-dev libjxl-dev \
+        graphviz \
+        python3 python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# ---- Eigen 3.4 from source (upstream approach; header-only, no runtime lib) ----
-WORKDIR /opt
-RUN git clone --branch 3.4 --depth 1 https://gitlab.com/libeigen/eigen.git
-WORKDIR /opt/eigen_build
-RUN cmake ../eigen -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    && make install
-
-# ---- OpenCV 4.12.0 from source ----
-# 4.12 is the version OpenMVS 2.4 targets; it adds IMWRITE_JPEGXL_QUALITY (so
-# we no longer need to patch that out of OpenMVS). Minimal build — only the
-# modules OpenMVS links against; no GUI/video/extra deps.
-WORKDIR /opt
-RUN git clone --branch 4.12.0 --depth 1 https://github.com/opencv/opencv.git
-WORKDIR /opt/opencv_build
-RUN cmake ../opencv \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_SHARED_LIBS=ON \
-        -DBUILD_TESTS=OFF \
-        -DBUILD_PERF_TESTS=OFF \
-        -DBUILD_EXAMPLES=OFF \
-        -DBUILD_opencv_apps=OFF \
-        -DWITH_OPENEXR=OFF \
-        -DWITH_FFMPEG=OFF \
-        -DWITH_GTK=OFF \
-        -DWITH_QT=OFF \
-    && make -j"$(nproc)" \
-    && make install \
-    && ldconfig
-
-# ---- CGAL v6.0.1 from source (upstream approach; mostly header-only) ----
+# ---- CGAL v6.0.1 from source (upstream approach; header-only, fast install) ----
 WORKDIR /opt
 RUN git clone --branch v6.0.1 --depth 1 https://github.com/CGAL/cgal.git
 WORKDIR /opt/cgal_build
@@ -89,14 +69,13 @@ RUN git clone https://github.com/cdcseacave/VCG.git vcglib \
     && git -C vcglib checkout "${VCG_COMMIT}"
 
 # ---- OpenMVS v2.4.0 ----
-# Ubuntu 26 patch: Boost 1.90 makes boost_system header-only with no cmake
-# config — remove it from the COMPONENTS list so find_package succeeds.
-# (IMWRITE_JPEGXL_QUALITY patch no longer needed — OpenCV 4.12 has it.)
+# Single patch on U24: apt OpenCV 4.6 lacks IMWRITE_JPEGXL_QUALITY (added in
+# 4.12); delete that line — harmless since we output PNG, not JXL. (No Boost
+# 'system' patch needed here: U24's Boost 1.83 still provides the component.)
 RUN git clone --recursive --branch v2.4.0 --depth 1 --shallow-submodules \
         https://github.com/cdcseacave/openMVS.git
 WORKDIR /opt/openMVS_build
-RUN sed -i 's/COMPONENTS iostreams program_options system serialization/COMPONENTS iostreams program_options serialization/' \
-        /opt/openMVS/CMakeLists.txt \
+RUN sed -i '/IMWRITE_JPEGXL_QUALITY/d' /opt/openMVS/libs/Common/Types.inl \
     && cmake /opt/openMVS \
         -DCMAKE_BUILD_TYPE=Release \
         -DVCG_ROOT=/opt/vcglib \
@@ -108,9 +87,9 @@ RUN sed -i 's/COMPONENTS iostreams program_options system serialization/COMPONEN
     && ldconfig
 
 # ---- OpenMVG v2.1 (SfM) ----
-# Clone non-recursively; init only cereal + osi_clp (glfw is GUI-only, skipped).
-# CMAKE_POLICY_VERSION_MINIMUM: Ubuntu 26's cmake 4.2 rejects the ancient
-# cmake_minimum_required in vendored osi_clp.
+# Clone non-recursively; init only the submodules we compile: cereal
+# (serialization, required) and osi_clp (linear solver for GLOBAL SfM). glfw is
+# GUI-only and skipped (BUILD_EXAMPLES=OFF).
 WORKDIR /opt
 RUN git clone --branch v2.1 --depth 1 https://github.com/openMVG/openMVG.git \
     && git -C openMVG submodule update --init --depth 1 \
@@ -120,51 +99,22 @@ RUN cmake -DCMAKE_BUILD_TYPE=RELEASE \
         -DOpenMVG_BUILD_TESTS=OFF \
         -DOpenMVG_BUILD_EXAMPLES=OFF \
         -DOpenMVG_BUILD_DOC=OFF \
-        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
         /opt/openMVG/src \
     && make -j"$(nproc)" \
     && make install \
     && ldconfig
-
-# =========================================================================
-#  Stage 3: runtime — engine runtime libs + binaries + Python app.
-# =========================================================================
-FROM ubuntu:26.04
-ARG DEBIAN_FRONTEND=noninteractive
-
-# Runtime shared libs the engine binaries link against + Python for the app.
-# OpenCV comes from the engine-builder COPY below (built 4.12.0 in /usr/local),
-# so no apt opencv packages here. The ldd gate fails the build if anything is
-# missing, so under-specified packages surface at build time.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        libpng16-16 libjpeg-turbo8 libtiff6 \
-        libjxl0.11 libwebp7 libwebpmux3 libwebpdemux2 \
-        libgomp1 \
-        libgmp10 libmpfr6 \
-        libceres4t64 libcholmod5 libcxsparse4 libspqr4 libblas3 liblapack3 \
-        libglu1-mesa \
-        libxxf86vm1 libxi6 libxrandr2 \
-        libboost-iostreams1.90.0 libboost-program-options1.90.0 \
-        libboost-serialization1.90.0 libboost-filesystem1.90.0 \
-        python3 python3-pip \
-    && rm -rf /var/lib/apt/lists/*
-
-# Carry over everything OpenMVG/OpenMVS/OpenCV installed (binaries + libs + share)
-COPY --from=engine-builder /usr/local /usr/local
-RUN ldconfig
 ENV PATH="/usr/local/bin/OpenMVS:${PATH}"
 
-# Verify every engine binary resolves its shared libs (fails loudly otherwise)
-RUN set -e; \
-    bins="$(ls /usr/local/bin/openMVG_main_* /usr/local/bin/OpenMVS/* 2>/dev/null)"; \
-    for b in $bins; do \
-        ldd "$b" 2>/dev/null | grep -q 'not found' \
-            && { echo "MISSING LIBS for $b:"; ldd "$b" | grep 'not found'; exit 1; } || true; \
-    done; \
-    command -v openMVG_main_SfMInit_ImageListing >/dev/null \
+# Sanity check: the key binaries resolve and run (single stage, so the libs
+# they linked against at build time are present by construction).
+RUN command -v openMVG_main_SfMInit_ImageListing >/dev/null \
     && command -v DensifyPointCloud >/dev/null \
-    && echo "OK: OpenMVG + OpenMVS runtime self-contained"
+    && command -v TextureMesh >/dev/null \
+    && echo "OK: OpenMVG + OpenMVS present"
+
+# Drop the heavy source trees (binaries + libs are installed to /usr/local).
+RUN rm -rf /opt/cgal /opt/cgal_build /opt/openMVS /opt/openMVS_build \
+           /opt/openMVG /opt/openMVG_build /opt/vcglib
 
 # ---- Python app ----
 WORKDIR /app

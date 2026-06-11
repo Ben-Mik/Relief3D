@@ -49,6 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libeigen3-dev \
         libboost-all-dev \
         libnanoflann-dev \
+        libjxl-dev \
         libopencv-dev \
         libgmp-dev libmpfr-dev zlib1g-dev \
         libblas-dev liblapack-dev libsuitesparse-dev \

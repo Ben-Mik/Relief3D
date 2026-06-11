@@ -45,6 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgmp-dev libmpfr-dev zlib1g-dev \
         libblas-dev liblapack-dev libsuitesparse-dev \
         libceres-dev \
+        libnanoflann-dev libjxl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ---- Eigen 3.4 from source (upstream approach; header-only, no runtime lib) ----

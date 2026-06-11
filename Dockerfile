@@ -70,13 +70,22 @@ RUN git clone https://github.com/cdcseacave/VCG.git vcglib \
     && git -C vcglib checkout "${VCG_COMMIT}"
 
 # ---- OpenMVS v2.4.0 ----
-# Single patch on U24: apt OpenCV 4.6 lacks IMWRITE_JPEGXL_QUALITY (added in
-# 4.12); delete that line — harmless since we output PNG, not JXL. (No Boost
-# 'system' patch needed here: U24's Boost 1.83 still provides the component.)
+# Two patches on Types.inl:
+#  1. Black-texture fix (THE texture-corruption bug): v2.4.0 introduced a
+#     template typo in TImage::sample() — the sampler is instantiated with
+#     INTERTYPE as its first arg instead of TYPE, which blackens textured faces
+#     under seam-leveling (github.com/cdcseacave/openMVS issues/1251). Upstream's
+#     develop fix is exactly this one-token change (INTERTYPE -> TYPE); applied
+#     here so we keep seam leveling ON (full quality) on the pinned v2.4.0 tag.
+#  2. apt OpenCV 4.6 lacks IMWRITE_JPEGXL_QUALITY (added in 4.12); delete that
+#     line — harmless since we output PNG, not JXL.
+# (No Boost 'system' patch needed: U24's Boost 1.83 still provides the component.)
 RUN git clone --recursive --branch v2.4.0 --depth 1 --shallow-submodules \
         https://github.com/cdcseacave/openMVS.git
 WORKDIR /opt/openMVS_build
-RUN sed -i '/IMWRITE_JPEGXL_QUALITY/d' /opt/openMVS/libs/Common/Types.inl \
+RUN sed -i 's/Sampler::Sample< INTERTYPE, INTERTYPE,/Sampler::Sample< TYPE, INTERTYPE,/' \
+        /opt/openMVS/libs/Common/Types.inl \
+    && sed -i '/IMWRITE_JPEGXL_QUALITY/d' /opt/openMVS/libs/Common/Types.inl \
     && cmake /opt/openMVS \
         -DCMAKE_BUILD_TYPE=Release \
         -DVCG_ROOT=/opt/vcglib \

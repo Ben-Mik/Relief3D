@@ -12,6 +12,7 @@ from flask import (
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 import os
+import re
 import uuid
 import json
 import threading
@@ -54,6 +55,12 @@ OUTPUT_DIR = os.path.join(DATA_DIR, "outputs")
 JOBS_FILE = os.path.join(DATA_DIR, "jobs", "jobs.json")
 JOBS_LOCK = threading.Lock()
 PHOTO_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
+# Textured-mesh output bundle (OpenMVS OBJ export = .obj + .mtl + .jpg atlas;
+# PLY path historically = .ply + .png). MESH_GEOM_EXTS = just the geometry file
+# (presence = "a model exists"); MESH_BUNDLE_EXTS = every file shipped/dropped/
+# swept as a unit.
+MESH_GEOM_EXTS = (".ply", ".obj")
+MESH_BUNDLE_EXTS = (".ply", ".obj", ".mtl", ".png", ".jpg", ".jpeg")
 # Retention window (hours) for both auto-sweeps: abandoned pending uploads and
 # leftover meshes from failed/local-only runs. Tune per excavation via env.
 SWEEP_HOURS = float(os.environ.get("RELIEF3D_SWEEP_HOURS", 8))
@@ -153,7 +160,7 @@ def _drop_meshes(d):
     """Remove the heavy textured-mesh files, keeping report.txt. Used after a
        successful (re)upload — the model is then safe in the annotator."""
     for f in os.listdir(d):
-        if f.lower().endswith((".ply", ".png", ".jpg", ".jpeg")):
+        if f.lower().endswith(MESH_BUNDLE_EXTS):
             os.remove(os.path.join(d, f))
 
 
@@ -164,7 +171,7 @@ def _can_reupload(job):
         return False
     d = job.get("output_dir")
     return bool(d) and os.path.isdir(d) and any(
-        f.lower().endswith(".ply") for f in os.listdir(d))
+        f.lower().endswith(MESH_GEOM_EXTS) for f in os.listdir(d))
 
 
 def _can_retry(job):
@@ -240,6 +247,7 @@ def new_job(project_id):
             "max_resolution": int(request.form.get("max_resolution", 2560)),
             "edge_length": float(request.form.get("edge_length") or 0),
             "decimate": float(request.form.get("decimate") or 0),
+            "close_holes": (request.form.get("close_holes") or "").strip(),
             "roi_border": float(request.form.get("roi_border") or 0),
             "texture_out_size": int(request.form.get("texture_out_size") or 0),
             "ransac_threshold": float(request.form.get("ransac_threshold") or 0.05),
@@ -456,7 +464,7 @@ def sweep_stale_outputs(max_age_h=8):
         if not os.path.isdir(d) or os.path.getmtime(d) >= cutoff:
             continue
         for f in os.listdir(d):
-            if f.lower().endswith((".ply", ".png", ".jpg", ".jpeg")):
+            if f.lower().endswith(MESH_BUNDLE_EXTS):
                 os.remove(os.path.join(d, f))
 
 
@@ -517,6 +525,15 @@ def _write_report(output_dir, job_id, options, report):
                     nf = int(line.split()[-1])
                 elif line == "end_header":
                     break
+    else:
+        # OBJ has no count header and is too large to scan; the engine logs the
+        # authoritative counts ("Mesh '...obj' saved: N vertices, M faces").
+        log = os.path.join(output_dir, "processing_log.txt")
+        if os.path.exists(log):
+            m = re.search(r"saved:\s*([\d]+)\s*vertices,\s*([\d]+)\s*faces",
+                          open(log, errors="ignore").read())
+            if m:
+                nv, nf = int(m.group(1)), int(m.group(2))
     edge = float(o["edge_length"])
     L = [
         "Relief3D processing report",
@@ -537,6 +554,7 @@ def _write_report(output_dir, job_id, options, report):
         f"Mesh edge-length:         {edge} m" + ("" if edge else " (off)"),
         f"Mesh decimate ratio:      {o['decimate'] or 'off'}",
         f"Auto-boundaries:          {o.get('roi_border') or 'off'}",
+        f"Close holes (edges):      {o.get('close_holes') or 'default (30)'}",
         f"Texture output size:      {o['texture_out_size'] or 'unchanged'}",
         f"Georef RANSAC threshold:  {o['ransac_threshold']} m",
         "",
@@ -566,12 +584,13 @@ def _write_report(output_dir, job_id, options, report):
 
 
 def _zip_textured_mesh(mesh_dir):
-    """In-memory baseFile.zip: ply + texture, plus report.txt sidecar.
-       The annotator's three.js loader takes the PLY model + a texture image."""
+    """In-memory baseFile.zip: the textured-mesh bundle (OBJ + MTL + JPG atlas,
+       or legacy PLY + PNG) plus the report.txt sidecar. The annotator loads the
+       geometry + texture image and ignores the MTL; external DCC tools use it."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(os.listdir(mesh_dir)):
-            if f.lower().endswith((".ply", ".png", ".jpg", ".jpeg")):
+            if f.lower().endswith(MESH_BUNDLE_EXTS):
                 z.write(os.path.join(mesh_dir, f), arcname=f)
     buf.seek(0)
     return buf
@@ -699,14 +718,14 @@ def process_relief_job(job_id, upload_dir, output_dir, options, gcp_coords,
                                      log_path=os.path.join(output_dir, "processing_log.txt"))
         report = result["georef"]
 
-        # Collect the textured mesh (ply + texture image) into output_dir.
+        # Collect the textured mesh bundle (obj + mtl + jpg atlas) into output_dir.
         # Match the textured-output prefix: the mvs dir also holds scene_dense.ply
         # (dense cloud) and scene_dense_mesh.ply (untextured) — we want only the
-        # scene_dense_mesh_texture.{ply,png} pair (the annotator takes 2 files max).
+        # scene_dense_mesh_texture.* set.
         mvs = os.path.join(work_dir, "mvs")
         produced = [f for f in os.listdir(mvs)
                     if f.startswith("scene_dense_mesh_texture")
-                    and f.lower().endswith((".ply", ".png", ".jpg", ".jpeg"))]
+                    and f.lower().endswith(MESH_BUNDLE_EXTS)]
         for f in produced:
             shutil.copy(os.path.join(mvs, f), output_dir)
         # Tag the report with the CRS (held on the job record) so it fully

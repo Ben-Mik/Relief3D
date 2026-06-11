@@ -142,6 +142,17 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
     # whether the silent texture corruption is an OpenMP/threading race in this build.
     tex_mt = (f" --max-threads {os.environ['RELIEF3D_TEX_THREADS']}"
               if os.environ.get("RELIEF3D_TEX_THREADS") else "")
+    # Hole filling (TextureMesh --close-holes): max hole size, as a boundary-edge
+    # count, that gets auto-filled. 0 = disabled, OpenMVS default = 30; higher
+    # fills bigger gaps but risks bridging real voids (e.g. a genuine pit edge).
+    # Raw user value; unset -> omit the flag so OpenMVS's own default (30) applies.
+    close_holes = (f" --close-holes {int(o['close_holes'])}"
+                   if str(o.get("close_holes") or "").strip() != "" else "")
+    # Uncovered faces get a dark neutral grey instead of OpenMVS's default
+    # alarm-orange. Dark (not light) because uncovered faces are usually in
+    # recessed/shadowed pockets of complex geometry, where a dark fill blends in
+    # as natural shadow rather than glowing as "missing data".
+    empty_color = 4210752  # 0x404040 (64,64,64) dark neutral grey
     # OpenMVS 2.4 estimates a region-of-interest from a robust *core* of points and
     # crops the mesh to it — and it's ON by default (--estimate-roi 1.1,
     # --crop-to-roi true), so a normal run silently trims the result, and on sparse
@@ -164,10 +175,18 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
         f"cd mvs;"
         f"DensifyPointCloud scene.mvs --resolution-level {o['resolution_level']} --max-resolution {o['max_resolution']}{densify_roi};"
         f"ReconstructMesh scene_dense.mvs{edge}{decimate}{recon_roi};"
-        # Export PLY (the default): OpenMVS v2.3.0's OBJ writer segfaults during
-        # export on this build, while PLY is reliable. PLY carries UVs + a
-        # sidecar texture PNG; the 3D-Annotator three.js loader takes PLY + PNG.
-        f"TextureMesh scene_dense.mvs --mesh-file scene_dense_mesh.ply{tex_mt} -o scene_dense_mesh_texture.mvs"
+        # --export-type obj: OBJ + MTL + JPG, the portable textured-mesh format for
+        # external DCC tools (Blender/MeshLab auto-texture via the MTL). The 2.3.0
+        # OBJ-writer segfault that forced PLY before is fixed in 2.4.0. The
+        # annotator loads OBJ + the image and ignores the MTL; external tools use
+        # it. (OBJ is ASCII so far larger than binary PLY — lean on --decimate for
+        # interactive meshes.)
+        # --max-texture-size 0 = unbounded -> ONE atlas sized to fit all patches,
+        # instead of the default 8192 cap that spills into a second (mostly empty)
+        # page. The texture_out_size resize below then scales that single atlas.
+        f"TextureMesh scene_dense.mvs --mesh-file scene_dense_mesh.ply{tex_mt}{close_holes}"
+        f" --max-texture-size 0 --empty-color {empty_color}"
+        f" --export-type obj -o scene_dense_mesh_texture.mvs"
     )
     _run(work_dir, mvs, progress, "Dense / mesh / texture", log_path)
 
@@ -181,12 +200,19 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
         if progress:
             progress("Resizing texture")
         t_resize = time.monotonic()
-        for tex in glob.glob(os.path.join(work_dir, "mvs", "scene_dense_mesh_texture*.png")):
+        # OBJ export writes the atlas as JPG (..._map_Kd.jpg); PLY would write PNG.
+        # Match either, but never the .obj/.mtl themselves.
+        texes = (glob.glob(os.path.join(work_dir, "mvs", "scene_dense_mesh_texture*.jpg"))
+                 + glob.glob(os.path.join(work_dir, "mvs", "scene_dense_mesh_texture*.png")))
+        for tex in texes:
             img = Image.open(tex)
             scale = tex_size / max(img.width, img.height)
             if scale != 1:
                 new = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
-                img.resize(new, Image.LANCZOS).save(tex)
+                # Preserve the source format; keep JPG high-quality to avoid
+                # compounding lossy recompression on the atlas.
+                save_kw = {"quality": 95} if tex.lower().endswith((".jpg", ".jpeg")) else {}
+                img.resize(new, Image.LANCZOS).save(tex, **save_kw)
                 if log_path:
                     with open(log_path, "a") as f:
                         f.write(f"\n# resized {os.path.basename(tex)} "
@@ -200,6 +226,6 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
             f.write(f"\n# TOTAL: {time.monotonic() - t_start:.1f}s\n")
 
     return {
-        "mesh_path": os.path.join(work_dir, "mvs", "scene_dense_mesh_texture.ply"),
+        "mesh_path": os.path.join(work_dir, "mvs", "scene_dense_mesh_texture.obj"),
         "georef": report,
     }

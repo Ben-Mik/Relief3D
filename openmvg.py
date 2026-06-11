@@ -42,9 +42,6 @@ def _run(work_dir, shell, progress=None, stage="", log_path=None):
     return r.stdout
 
 
-_IMG_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
-
-
 def _downscale_images(work_dir, pct, observations):
     """Downscale the pipeline's working images to `pct`% of their dimensions,
        preserving EXIF. OpenMVG reads focal length + camera model from EXIF and
@@ -57,7 +54,7 @@ def _downscale_images(work_dir, pct, observations):
     factor = pct / 100.0
     img_dir = os.path.join(work_dir, "images")
     for name in os.listdir(img_dir):
-        if not name.lower().endswith(_IMG_EXTS):
+        if not name.lower().endswith(georef.PHOTO_EXTS):
             continue
         path = os.path.join(img_dir, name)
         im = Image.open(path)

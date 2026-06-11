@@ -24,8 +24,9 @@ import io
 import zipfile
 import requests
 from datetime import datetime
-import cv2
 import openmvg  # OpenMVG→georef→OpenMVS engine
+import georef  # marker detection + georeferencing (also owns PHOTO_EXTS)
+from georef import PHOTO_EXTS
 from dotenv import load_dotenv
 
 # Load configuration from .env (if it exists) into os.environ.
@@ -54,7 +55,6 @@ UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 OUTPUT_DIR = os.path.join(DATA_DIR, "outputs")
 JOBS_FILE = os.path.join(DATA_DIR, "jobs", "jobs.json")
 JOBS_LOCK = threading.Lock()
-PHOTO_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
 # Textured-mesh output bundle (OpenMVS OBJ export = .obj + .mtl + .jpg atlas;
 # PLY path historically = .ply + .png). MESH_GEOM_EXTS = just the geometry file
 # (presence = "a model exists"); MESH_BUNDLE_EXTS = every file shipped/dropped/
@@ -75,18 +75,26 @@ os.makedirs(os.path.dirname(JOBS_FILE), exist_ok=True)
 
 # ─── Job storage ────────────────────────────────────────────────────────────
 
+def _load_jobs_unlocked():
+    if not os.path.exists(JOBS_FILE):
+        return {}
+    with open(JOBS_FILE) as f:
+        return json.load(f)
+
+
+def _save_jobs_unlocked(jobs):
+    with open(JOBS_FILE, "w") as f:
+        json.dump(jobs, f, indent=2)
+
+
 def load_jobs():
     with JOBS_LOCK:
-        if not os.path.exists(JOBS_FILE):
-            return {}
-        with open(JOBS_FILE) as f:
-            return json.load(f)
+        return _load_jobs_unlocked()
 
 
 def save_jobs(jobs):
     with JOBS_LOCK:
-        with open(JOBS_FILE, "w") as f:
-            json.dump(jobs, f, indent=2)
+        _save_jobs_unlocked(jobs)
 
 
 # Shared-offset presets ({name: {"offset": [x,y,z]}}) — co-register models in one frame.
@@ -106,10 +114,16 @@ def save_offset_presets(presets):
 
 
 def update_job(job_id, **updates):
-    jobs = load_jobs()
-    if job_id in jobs:
-        jobs[job_id].update(updates)
-        save_jobs(jobs)
+    # The whole read-modify-write is under JOBS_LOCK so concurrent writers (job
+    # worker + upload reconciler) can't interleave and clobber each other's
+    # fields — e.g. the worker's status=done erasing the reconciler's
+    # pending_model_id, which would defeat upload idempotency and double-create
+    # the annotator model. Uses the *unlocked* helpers (JOBS_LOCK isn't reentrant).
+    with JOBS_LOCK:
+        jobs = _load_jobs_unlocked()
+        if job_id in jobs:
+            jobs[job_id].update(updates)
+            _save_jobs_unlocked(jobs)
 
 
 # ─── Annotator-token side store ──────────────────────────────────────────────
@@ -279,8 +293,7 @@ def new_job(project_id):
             observations = {fn: {int(k): tuple(v) for k, v in m.items()}
                             for fn, m in raw.items()}
 
-        jobs = load_jobs()
-        jobs[job_id] = {
+        new_record = {
             "status": "queued", "progress": 0, "step": "Queued",
             "project_id": project_id, "model_name": model_name,
             "photo_count": len(files), "options": options,
@@ -291,7 +304,12 @@ def new_job(project_id):
             "upload_dir": job_upload_dir, "output_dir": job_output_dir,
             "created_at": datetime.now().isoformat(),
         }
-        save_jobs(jobs)
+        # Atomic insert (same reason as update_job): the background worker /
+        # reconciler may be rewriting jobs.json at the same moment.
+        with JOBS_LOCK:
+            jobs = _load_jobs_unlocked()
+            jobs[job_id] = new_record
+            _save_jobs_unlocked(jobs)
 
         # Shared-offset preset (or None = auto-centroid).
         preset_offset = None
@@ -380,28 +398,12 @@ def api_job(job_id):
 # {filename: {marker_id: [u, v]}} that any engine's file-handler consumes.
 # ---------------------------------------------------------------------------
 def detect_all_markers(photos_dir):
-    """-> {filename: [{id, cx, cy}]} for every AprilTag 36h11 found (perspective-correct centre)."""
-    detector = cv2.aruco.ArucoDetector(
-        cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11),
-        cv2.aruco.DetectorParameters(),
-    )
-    out = {}
-    for filename in sorted(os.listdir(photos_dir)):
-        if not filename.lower().endswith(PHOTO_EXTS):
-            continue
-        img = cv2.imread(os.path.join(photos_dir, filename), cv2.IMREAD_GRAYSCALE)
-        if img is None:
-            continue
-        corners, ids, _ = detector.detectMarkers(img)
-        if ids is None:
-            continue
-        marks = []
-        for c, i in zip(corners, ids.flatten()):
-            cx, cy = c[0].mean(axis=0)
-            marks.append({"id": int(i), "cx": round(float(cx), 1), "cy": round(float(cy), 1)})
-        if marks:
-            out[filename] = marks
-    return out
+    """UI shape {filename: [{id, cx, cy}]} over georef's accurate (perspective-
+       correct) detector, so the GCP tool suggests exactly the centres georef
+       will triangulate from — no second, rougher detection path."""
+    return {fn: [{"id": mid, "cx": round(u, 1), "cy": round(v, 1)}
+                 for mid, (u, v) in marks.items()]
+            for fn, marks in georef.detect_observations(photos_dir).items()}
 
 
 def _job_upload_dir(job_id):

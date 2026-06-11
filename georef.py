@@ -4,7 +4,7 @@ Decoupled georeferencing — engine-agnostic.
 Needs only: camera poses (from any SfM), the photos, and GCP survey coords.
   aruco detect -> triangulate markers in SfM frame
   -> RANSAC Umeyama (7-DOF, auto-drops outliers, flags them)
-  -> apply rigid transform to mesh (and optionally cameras).
+  -> apply the similarity transform to the SfM poses + structure (before dense/mesh).
 
 Output is in a LOCAL frame (a shared offset subtracted) so multiple models using the
 same offset preset line up together (e.g. in Blender). Real-world = local + offset.
@@ -20,6 +20,10 @@ import numpy as np
 import cv2
 
 APRILTAG_DICT = cv2.aruco.DICT_APRILTAG_36h11
+
+# Photo file types the pipeline accepts. Defined here (the lowest-level module)
+# and imported by app.py + openmvg.py so there's a single source of truth.
+PHOTO_EXTS = (".jpg", ".jpeg", ".png", ".tif", ".tiff")
 
 
 # ----------------------------- marker detection -----------------------------
@@ -41,8 +45,8 @@ def detect_observations(images_dir, dict_id=APRILTAG_DICT):
         cv2.aruco.getPredefinedDictionary(dict_id),
         cv2.aruco.DetectorParameters())
     obs = {}
-    for p in sorted(glob.glob(os.path.join(images_dir, "*.jpg")) +
-                    glob.glob(os.path.join(images_dir, "*.JPG"))):
+    for p in sorted(f for f in glob.glob(os.path.join(images_dir, "*"))
+                    if f.lower().endswith(PHOTO_EXTS)):
         img = cv2.imread(p, cv2.IMREAD_GRAYSCALE)
         if img is None:
             continue
@@ -165,22 +169,7 @@ def resolve_offset(gcp_coords, preset_offset=None):
     return np.floor(c)
 
 
-# ----------------------------- apply to mesh --------------------------------
-def apply_similarity_to_mesh(mesh_in, mesh_out, s, R, t):
-    """X' = s*R*X + t for OBJ vertices (OpenMVS/Tequila output OBJ)."""
-    M = s * R
-    if os.path.splitext(mesh_in)[1].lower() != ".obj":
-        raise NotImplementedError("only OBJ implemented (add PLY in build-out)")
-    with open(mesh_in) as fi, open(mesh_out, "w") as fo:
-        for line in fi:
-            if line.startswith("v "):
-                _, x, y, z = line.split()[:4]
-                X = M @ np.array([float(x), float(y), float(z)]) + t
-                fo.write(f"v {X[0]:.6f} {X[1]:.6f} {X[2]:.6f}\n")
-            else:
-                fo.write(line)
-
-
+# ----------------------------- apply to sfm_data ----------------------------
 def apply_to_sfm_data(sfm_json, s, R, t):
     """Approach B: transform poses + sparse structure inside an OpenMVG sfm_data JSON,
        in place, by X' = s*R*X + t (the georef fit). Feed the result to openMVG2openMVS so
@@ -200,7 +189,7 @@ def apply_to_sfm_data(sfm_json, s, R, t):
 
 
 # ----------------------------- orchestration --------------------------------
-def georeference(images_dir, poses_json, gcp_coords, mesh_in=None, mesh_out=None,
+def georeference(images_dir, poses_json, gcp_coords,
                  preset_offset=None, threshold=0.05, observations=None):
     """Decoupled georeferencing. gcp_coords {marker_id:(X,Y,Z)} real-world.
        observations: optional precomputed {file:{id:(u,v)}} (e.g. from manual web picks);
@@ -221,9 +210,6 @@ def georeference(images_dir, poses_json, gcp_coords, mesh_in=None, mesh_out=None
     s, R, t, inliers, res = ransac_similarity(usable, src, dst, threshold)
     outliers = [i for i in usable if i not in inliers]
     rms = float(np.sqrt(np.mean([res[i] ** 2 for i in inliers])))
-
-    if mesh_in and mesh_out:
-        apply_similarity_to_mesh(mesh_in, mesh_out, s, R, t)
 
     return {"georeferenced": True, "scale": float(s), "offset": offset.tolist(),
             "inliers": inliers, "outliers": outliers, "residuals_m": res,

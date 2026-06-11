@@ -8,7 +8,7 @@
 # or:  docker compose up -d --build
 #
 # x86 only — OpenMVS TextureMesh needs AVX (won't run on Apple Silicon).
-# Engine pins: OpenMVG v2.1, OpenMVS v2.4.0, VCGLib 658ba36 (reproducible).
+# Engine pins: OpenMVG v2.1, OpenMVS v2.4.0, OpenCV 4.12.0, VCGLib 658ba36.
 
 # =========================================================================
 #  Stage 1: Tailwind/DaisyUI CSS bundle
@@ -22,41 +22,80 @@ RUN npm init -y >/dev/null && \
     npx tailwindcss -i ./input.css -o ./output.css --minify
 
 # =========================================================================
-#  Stage 2: engine builder — compiles OpenMVG + OpenMVS (no CUDA, headless).
-#  OpenMVS is built FIRST against pristine system Eigen 3.4; OpenMVG bundles its
-#  own Eigen and is built last to avoid the clash.
+#  Stage 2: engine builder — compiles Eigen, OpenCV, CGAL, OpenMVG, OpenMVS.
+#
+#  Build order follows upstream's buildInDocker.sh (Eigen → OpenCV → CGAL →
+#  OpenMVS), with OpenMVG added after. OpenCV is built from source at 4.12.0
+#  rather than apt so OpenMVS gets the version it targets and we avoid
+#  packaging quirks. Ubuntu 26 patches noted inline.
 # =========================================================================
 FROM ubuntu:26.04 AS engine-builder
 ARG DEBIAN_FRONTEND=noninteractive
 ARG VCG_COMMIT=658ba36d0a5666650da6e066b4794efc5a463407
 
+# Build-time deps (same set upstream uses, plus Ceres/SuiteSparse for OpenMVG)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake git ca-certificates pkg-config \
         libpng-dev libjpeg-dev libtiff-dev \
+        libglu1-mesa-dev libglew-dev libglfw3-dev \
         libxxf86vm-dev libxi-dev libxrandr-dev \
-        libeigen3-dev \
-        libboost-all-dev \
-        libnanoflann-dev \
-        libjxl-dev \
-        libopencv-dev \
-        libcgal-dev \
+        libboost-iostreams-dev libboost-program-options-dev \
+        libboost-system-dev libboost-serialization-dev \
+        libboost-filesystem-dev \
+        libgmp-dev libmpfr-dev zlib1g-dev \
         libblas-dev liblapack-dev libsuitesparse-dev \
         libceres-dev \
-        libglu1-mesa-dev freeglut3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# VCGLib (OpenMVS header-only dependency) — pinned by commit
+# ---- Eigen 3.4 from source (upstream approach; header-only, no runtime lib) ----
+WORKDIR /opt
+RUN git clone --branch 3.4 --depth 1 https://gitlab.com/libeigen/eigen.git
+WORKDIR /opt/eigen_build
+RUN cmake ../eigen -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+    && make install
+
+# ---- OpenCV 4.12.0 from source ----
+# 4.12 is the version OpenMVS 2.4 targets; it adds IMWRITE_JPEGXL_QUALITY (so
+# we no longer need to patch that out of OpenMVS). Minimal build — only the
+# modules OpenMVS links against; no GUI/video/extra deps.
+WORKDIR /opt
+RUN git clone --branch 4.12.0 --depth 1 https://github.com/opencv/opencv.git
+WORKDIR /opt/opencv_build
+RUN cmake ../opencv \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=ON \
+        -DBUILD_TESTS=OFF \
+        -DBUILD_PERF_TESTS=OFF \
+        -DBUILD_EXAMPLES=OFF \
+        -DBUILD_opencv_apps=OFF \
+        -DWITH_OPENEXR=OFF \
+        -DWITH_FFMPEG=OFF \
+        -DWITH_GTK=OFF \
+        -DWITH_QT=OFF \
+    && make -j"$(nproc)" \
+    && make install \
+    && ldconfig
+
+# ---- CGAL v6.0.1 from source (upstream approach; mostly header-only) ----
+WORKDIR /opt
+RUN git clone --branch v6.0.1 --depth 1 https://github.com/CGAL/cgal.git
+WORKDIR /opt/cgal_build
+RUN cmake ../cgal -DCMAKE_BUILD_TYPE=Release && make install
+
+# ---- VCGLib (OpenMVS header-only dependency) — pinned by commit ----
 WORKDIR /opt
 RUN git clone https://github.com/cdcseacave/VCG.git vcglib \
     && git -C vcglib checkout "${VCG_COMMIT}"
 
-# OpenMVS (dense / mesh / texture) — built against system Eigen 3.4
+# ---- OpenMVS v2.4.0 ----
+# Ubuntu 26 patch: Boost 1.90 makes boost_system header-only with no cmake
+# config — remove it from the COMPONENTS list so find_package succeeds.
+# (IMWRITE_JPEGXL_QUALITY patch no longer needed — OpenCV 4.12 has it.)
 RUN git clone --recursive --branch v2.4.0 --depth 1 --shallow-submodules \
         https://github.com/cdcseacave/openMVS.git
 WORKDIR /opt/openMVS_build
 RUN sed -i 's/COMPONENTS iostreams program_options system serialization/COMPONENTS iostreams program_options serialization/' \
         /opt/openMVS/CMakeLists.txt \
-    && sed -i '/IMWRITE_JPEGXL_QUALITY/d' /opt/openMVS/libs/Common/Types.inl \
     && cmake /opt/openMVS \
         -DCMAKE_BUILD_TYPE=Release \
         -DVCG_ROOT=/opt/vcglib \
@@ -67,11 +106,10 @@ RUN sed -i 's/COMPONENTS iostreams program_options system serialization/COMPONEN
     && make install \
     && ldconfig
 
-# OpenMVG (SfM) — built last. Clone non-recursively and init only the submodules
-# we actually compile: cereal (serialization, required) and osi_clp (linear
-# solver used by the GLOBAL SfM engine). The glfw submodule is skipped — it's
-# only for openMVG's GUI/examples, which we don't build (BUILD_EXAMPLES=OFF), so
-# fetching it is both dead weight and a needless network failure point.
+# ---- OpenMVG v2.1 (SfM) ----
+# Clone non-recursively; init only cereal + osi_clp (glfw is GUI-only, skipped).
+# CMAKE_POLICY_VERSION_MINIMUM: Ubuntu 26's cmake 4.2 rejects the ancient
+# cmake_minimum_required in vendored osi_clp.
 WORKDIR /opt
 RUN git clone --branch v2.1 --depth 1 https://github.com/openMVG/openMVG.git \
     && git -C openMVG submodule update --init --depth 1 \
@@ -93,9 +131,10 @@ RUN cmake -DCMAKE_BUILD_TYPE=RELEASE \
 FROM ubuntu:26.04
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Runtime-only shared libs the OpenMVG/OpenMVS binaries link against, plus
-# Python for the web app. (The ldd gate below fails the build if any engine
-# lib is still missing, so an under-specified package surfaces at build time.)
+# Runtime shared libs the engine binaries link against + Python for the app.
+# OpenCV comes from the engine-builder COPY below (built 4.12.0 in /usr/local),
+# so no apt opencv packages here. The ldd gate fails the build if anything is
+# missing, so under-specified packages surface at build time.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         libpng16-16 libjpeg-turbo8 libtiff6 \
@@ -106,12 +145,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxxf86vm1 libxi6 libxrandr2 \
         libboost-iostreams1.90.0 libboost-program-options1.90.0 \
         libboost-serialization1.90.0 libboost-filesystem1.90.0 \
-        libopencv-core410 libopencv-imgproc410 libopencv-imgcodecs410 \
-        libopencv-calib3d410 libopencv-features2d410 libopencv-flann410 \
         python3 python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Carry over everything OpenMVG/OpenMVS installed (binaries + libs + share)
+# Carry over everything OpenMVG/OpenMVS/OpenCV installed (binaries + libs + share)
 COPY --from=engine-builder /usr/local /usr/local
 RUN ldconfig
 ENV PATH="/usr/local/bin/OpenMVS:${PATH}"

@@ -514,28 +514,17 @@ def _write_report(output_dir, job_id, options, report):
     """Human-readable report.txt shipped with the model: settings + georef + offset."""
     job = load_jobs().get(job_id, {})
     o = options
-    ply = next((f for f in os.listdir(output_dir) if f.lower().endswith(".ply")), None)
+    # Vertex/face counts: the OBJ is too large to scan, so read the authoritative
+    # counts the engine logged ("Mesh '...' saved: N vertices, M faces"). The log
+    # has two such lines (ReconstructMesh's mesh, then TextureMesh's final OBJ);
+    # take the LAST so close-holes face additions during texturing are counted.
     nv = nf = 0
-    if ply:
-        # PLY headers are ASCII even for binary bodies; read counts from there.
-        with open(os.path.join(output_dir, ply), "rb") as fh:
-            for raw in fh:
-                line = raw.decode("ascii", "ignore").strip()
-                if line.startswith("element vertex"):
-                    nv = int(line.split()[-1])
-                elif line.startswith("element face"):
-                    nf = int(line.split()[-1])
-                elif line == "end_header":
-                    break
-    else:
-        # OBJ has no count header and is too large to scan; the engine logs the
-        # authoritative counts ("Mesh '...obj' saved: N vertices, M faces").
-        log = os.path.join(output_dir, "processing_log.txt")
-        if os.path.exists(log):
-            m = re.search(r"saved:\s*([\d]+)\s*vertices,\s*([\d]+)\s*faces",
+    log = os.path.join(output_dir, "processing_log.txt")
+    if os.path.exists(log):
+        hits = re.findall(r"saved:\s*(\d+)\s*vertices,\s*(\d+)\s*faces",
                           open(log, errors="ignore").read())
-            if m:
-                nv, nf = int(m.group(1)), int(m.group(2))
+        if hits:
+            nv, nf = int(hits[-1][0]), int(hits[-1][1])
     edge = float(o["edge_length"])
     L = [
         "Relief3D processing report",

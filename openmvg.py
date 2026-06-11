@@ -76,8 +76,8 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
     """Full pipeline. Photos must already be at  work_dir/images.
        Returns {"mesh_path": <obj>, "georef": <report dict>}.
        options: feature_preset, sfm_engine, max_image_pct, resolution_level,
-                max_resolution, edge_length, decimate, texture_out_size,
-                ransac_threshold.
+                max_resolution, edge_length, decimate, roi_border, close_holes,
+                texture_out_size, ransac_threshold.
        log_path: if given, the full per-stage engine output is written there
                  (kept on the hub for post-mortem; not shipped to the annotator)."""
     o = options
@@ -129,8 +129,8 @@ def reconstruct(work_dir, options, gcp_coords=None, observations=None,
             f.write(f"\n# georef: {report}\n")
 
     # ---- OpenMVS dense / mesh / texture ----
-    # Detail levers on ReconstructMesh (both built into OpenMVS v2.3.0, quadric
-    # edge-collapse simplification). edge-length is metric when georeferenced
+    # Detail levers on ReconstructMesh (quadric edge-collapse simplification).
+    # edge-length is metric when georeferenced
     # (real-world triangle size); decimate is a scale-independent ratio (0..1].
     # Keeping the mesh small here also keeps TextureMesh fast.
     edge = f" --edge-length {o['edge_length']}" if float(o.get("edge_length") or 0) > 0 else ""

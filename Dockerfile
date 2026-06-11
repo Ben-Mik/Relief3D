@@ -139,6 +139,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         libpng16-16 libjpeg-turbo8 libtiff6 \
+        libjxl0.11 libwebp7 libwebpmux3 libwebpdemux2 \
         libgomp1 \
         libgmp10 libmpfr6 \
         libceres4t64 libcholmod5 libcxsparse4 libspqr4 libblas3 liblapack3 \

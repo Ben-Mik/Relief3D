@@ -525,6 +525,9 @@ def _write_report(output_dir, job_id, options, report):
                           open(log, errors="ignore").read())
         if hits:
             nv, nf = int(hits[-1][0]), int(hits[-1][1])
+    # Distinguish "couldn't read the count" from a real empty mesh: a parse miss
+    # leaves nv=nf=0, which would otherwise print a misleading "0 vertices".
+    mesh_line = f"{nv:,} vertices · {nf:,} faces" if (nv or nf) else "(count unavailable)"
     edge = float(o["edge_length"])
     L = [
         "Relief3D processing report",
@@ -533,7 +536,7 @@ def _write_report(output_dir, job_id, options, report):
         f"Project: #{job.get('project_id', '')}",
         f"Created: {job.get('created_at', '')}",
         f"Photos:  {job.get('photo_count', '')}",
-        f"Mesh:    {nv:,} vertices · {nf:,} faces",
+        f"Mesh:    {mesh_line}",
         "",
         "Settings",
         "--------",

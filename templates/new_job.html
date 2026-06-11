@@ -145,12 +145,15 @@
                 </select>
                 <button type="button" id="add-offset" class="btn btn-sm btn-outline">+ Preset</button>
             </div>
-            <div id="offset-form" class="hidden mt-2 grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-2 items-center">
-                <input id="off-name" placeholder="Preset name" class="input input-bordered input-sm">
-                <input id="off-x" type="number" step="any" placeholder="X" class="input input-bordered input-sm">
-                <input id="off-y" type="number" step="any" placeholder="Y" class="input input-bordered input-sm">
-                <input id="off-z" type="number" step="any" placeholder="Z" class="input input-bordered input-sm">
-                <button type="button" id="off-save" class="btn btn-sm btn-primary">Save</button>
+            <div id="offset-form" class="hidden mt-2 space-y-2">
+                <input id="off-name" placeholder="Preset name"
+                       class="input input-bordered input-sm w-full">
+                <div class="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
+                    <input id="off-x" type="number" step="any" placeholder="X" class="input input-bordered input-sm w-full">
+                    <input id="off-y" type="number" step="any" placeholder="Y" class="input input-bordered input-sm w-full">
+                    <input id="off-z" type="number" step="any" placeholder="Z" class="input input-bordered input-sm w-full">
+                    <button type="button" id="off-save" class="btn btn-sm btn-primary">Save</button>
+                </div>
             </div>
             <p class="text-xs opacity-60 mt-1">
                 Subtracts a fixed origin so multiple models share one frame (align in Blender).
